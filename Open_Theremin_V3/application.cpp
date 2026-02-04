@@ -71,6 +71,38 @@ static uint16_t old_data_pot_value = 0;
 static uint16_t param_pot_value = 0; 
 static uint16_t old_param_pot_value = 0; 
 
+static volatile uint32_t pitch_measure_edges = 0;
+static volatile uint32_t volume_measure_edges = 0;
+
+static void onPitchMeasureEdge() {
+  pitch_measure_edges++;
+}
+
+static void onVolumeMeasureEdge() {
+  volume_measure_edges++;
+}
+
+static unsigned long countEdgesForMs(uint8_t pin, void (*isr)(), volatile uint32_t *edgeCounter, uint16_t gateMs) {
+  const int irq = digitalPinToInterrupt(pin);
+  if (irq == NOT_AN_INTERRUPT) {
+    return 0;
+  }
+
+  noInterrupts();
+  *edgeCounter = 0;
+  interrupts();
+
+  attachInterrupt(irq, isr, RISING);
+  delay(gateMs);
+  detachInterrupt(irq);
+
+  noInterrupts();
+  const uint32_t edges = *edgeCounter;
+  interrupts();
+
+  return (edges * 1000UL) / gateMs;
+}
+
 
 Application::Application()
   : _state(PLAYING),
@@ -84,7 +116,6 @@ void Application::setup() {
   pinMode(Application::BUTTON_PIN, INPUT_PULLUP);
   pinMode(Application::LED_PIN_1,    OUTPUT);
   pinMode(Application::LED_PIN_2,    OUTPUT);
-  pinMode(OT_WAVE_TICK_PIN, INPUT);
   pinMode(OT_VOLUME_CAPTURE_PIN, INPUT);
   pinMode(OT_PITCH_CAPTURE_PIN, INPUT);
 
@@ -137,35 +168,13 @@ unsigned long Application::GetQMeasurement()
 
 unsigned long Application::GetPitchMeasurement()
 {
-  const unsigned long window_us = 1000000UL;
-  unsigned long edges = 0;
-  bool prev = digitalRead(OT_PITCH_CAPTURE_PIN);
-  const unsigned long start = micros();
-  while ((micros() - start) < window_us) {
-    const bool now = digitalRead(OT_PITCH_CAPTURE_PIN);
-    if (now && !prev) {
-      edges++;
-    }
-    prev = now;
-  }
-  return edges;
+  return countEdgesForMs(OT_PITCH_CAPTURE_PIN, onPitchMeasureEdge, &pitch_measure_edges, 1000);
 
 }
 
 unsigned long Application::GetVolumeMeasurement()
 {
-  const unsigned long window_us = 1000000UL;
-  unsigned long edges = 0;
-  bool prev = digitalRead(OT_VOLUME_CAPTURE_PIN);
-  const unsigned long start = micros();
-  while ((micros() - start) < window_us) {
-    const bool now = digitalRead(OT_VOLUME_CAPTURE_PIN);
-    if (now && !prev) {
-      edges++;
-    }
-    prev = now;
-  }
-  return edges;
+  return countEdgesForMs(OT_VOLUME_CAPTURE_PIN, onVolumeMeasureEdge, &volume_measure_edges, 1000);
 }
 
 

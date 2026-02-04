@@ -4,17 +4,26 @@
 #include "SPImcpDAC.h"
 #include "timer.h"
 #include "pins.h"
+#include "wavetables.h"
 
 #include "build.h"
 
-#include "theremin_sintable.c"
-#include "theremin_sintable2.c"
-#include "theremin_sintable3.c"
-#include "theremin_sintable4.c"
-#include "theremin_sintable5.c"
-#include "theremin_sintable6.c"
-#include "theremin_sintable7.c"
-#include "theremin_sintable8.c"
+#if __has_include(<FspTimer.h>)
+#include <FspTimer.h>
+#define OT_HAS_FSP_TIMER 1
+#else
+#define OT_HAS_FSP_TIMER 0
+#endif
+
+#if OT_HAS_FSP_TIMER && __has_include(<r_timer_api.h>)
+#include <r_timer_api.h>
+#define OT_TIMER_CB_HAS_ARGS 1
+#else
+#define OT_TIMER_CB_HAS_ARGS 0
+#endif
+
+static const uint32_t MCP_DAC_BASE = 2048;
+static const float OT_AUDIO_TICK_HZ = 31250.0f;
 
 const int16_t* const wavetables[] = {
   sine_table,
@@ -26,8 +35,6 @@ const int16_t* const wavetables[] = {
   sine_table7,
   sine_table8
 };
-
-static const uint32_t MCP_DAC_BASE = 2048;
 
 volatile uint16_t vScaledVolume = 0;
 volatile uint16_t vPointerIncrement = 0;
@@ -45,8 +52,6 @@ volatile uint16_t vol_counter = 0;
 volatile uint16_t vol_counter_i = 0;
 volatile uint16_t vol_counter_l;
 
-volatile uint16_t timer_overflow_counter;
-
 volatile uint8_t vWavetableSelector = 0;
 
 static volatile uint16_t pointer = 0;
@@ -56,45 +61,32 @@ static volatile uint8_t debounce_v = 0;
 static volatile bool int1Enabled = false;
 static volatile uint16_t pitch_capture_counter_i = 0;
 
+#if OT_HAS_FSP_TIMER
+static FspTimer waveTimer;
+static bool waveTimerStarted = false;
+static uint8_t waveTimerType = GPT_TIMER;
+static int8_t waveTimerChannel = -1;
+#endif
+
 static inline uint16_t readTimerCounter16() {
+  // 1MHz monotonic source converted to ~16MHz virtual ticks for legacy math.
   return (uint16_t)((micros() * 16UL) & 0xFFFF);
 }
 
-void ihDisableInt1() {
-  int1Enabled = false;
-}
-
-void ihEnableInt1() {
-  if (reenableInt1) {
-    int1Enabled = true;
-  }
-}
-
-static void onPitchCapture() {
-  pitch_capture_counter_i = readTimerCounter16();
-  debounce_p = 0;
-}
-
-static void onVolumeCapture() {
-  vol_counter_i = readTimerCounter16();
-  debounce_v = 0;
-}
-
-static void onWaveTick() {
+static inline void runWaveTick() {
   if (!int1Enabled) {
     return;
   }
 
   SPImcpDAClatch();
 
-  uint32_t scaledSample = 0;
-  uint16_t offset = (uint16_t)(pointer >> 6) & 0x3ff;
+  const uint16_t offset = (uint16_t)(pointer >> 6) & 0x3ff;
 
 #if CV_ENABLED
   #error "CV_ENABLED is not supported on UNO R4 backend"
 #else
   const int16_t waveSample = wavetables[vWavetableSelector][offset];
-  scaledSample = ((int32_t)waveSample * (uint32_t)vScaledVolume) >> 16;
+  const uint32_t scaledSample = ((int32_t)waveSample * (uint32_t)vScaledVolume) >> 16;
   SPImcpDACsend(scaledSample + MCP_DAC_BASE);
   pointer += vPointerIncrement;
 #endif
@@ -123,20 +115,41 @@ static void onWaveTick() {
   }
 }
 
-void ihInitialiseTimer() {
-  // Nothing to configure on UNO R4.
+#if OT_TIMER_CB_HAS_ARGS
+static void onWaveTimerTick(timer_callback_args_t *p_args) {
+  (void)p_args;
+  runWaveTick();
+}
+#else
+static void onWaveTimerTick() {
+  runWaveTick();
+}
+#endif
+
+static void onPitchCapture() {
+  pitch_capture_counter_i = readTimerCounter16();
+  debounce_p = 0;
 }
 
-void ihInitialiseInterrupts() {
-  reenableInt1 = true;
-  int1Enabled = true;
-  const int waveInterrupt = digitalPinToInterrupt(OT_WAVE_TICK_PIN);
+static void onVolumeCapture() {
+  vol_counter_i = readTimerCounter16();
+  debounce_v = 0;
+}
+
+void ihDisableInt1() {
+  int1Enabled = false;
+}
+
+void ihEnableInt1() {
+  if (reenableInt1) {
+    int1Enabled = true;
+  }
+}
+
+static void attachCaptureInterrupts() {
   const int volumeInterrupt = digitalPinToInterrupt(OT_VOLUME_CAPTURE_PIN);
   const int pitchInterrupt = digitalPinToInterrupt(OT_PITCH_CAPTURE_PIN);
 
-  if (waveInterrupt != NOT_AN_INTERRUPT) {
-    attachInterrupt(waveInterrupt, onWaveTick, RISING);
-  }
   if (volumeInterrupt != NOT_AN_INTERRUPT) {
     attachInterrupt(volumeInterrupt, onVolumeCapture, RISING);
   }
@@ -145,21 +158,75 @@ void ihInitialiseInterrupts() {
   }
 }
 
-void ihInitialisePitchMeasurement() {
-  reenableInt1 = false;
-  int1Enabled = false;
-  const int waveInterrupt = digitalPinToInterrupt(OT_WAVE_TICK_PIN);
+static void detachCaptureInterrupts() {
   const int volumeInterrupt = digitalPinToInterrupt(OT_VOLUME_CAPTURE_PIN);
   const int pitchInterrupt = digitalPinToInterrupt(OT_PITCH_CAPTURE_PIN);
-  if (waveInterrupt != NOT_AN_INTERRUPT) {
-    detachInterrupt(waveInterrupt);
-  }
   if (volumeInterrupt != NOT_AN_INTERRUPT) {
     detachInterrupt(volumeInterrupt);
   }
   if (pitchInterrupt != NOT_AN_INTERRUPT) {
     detachInterrupt(pitchInterrupt);
   }
+}
+
+static void startWaveTimer() {
+#if OT_HAS_FSP_TIMER
+  if (waveTimerStarted) {
+    return;
+  }
+
+  if (waveTimerChannel < 0) {
+    waveTimerChannel = FspTimer::get_available_timer(waveTimerType);
+  }
+
+  if (waveTimerChannel >= 0) {
+    waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, OT_AUDIO_TICK_HZ, 0.0f, onWaveTimerTick);
+    waveTimer.setup_overflow_irq();
+    waveTimer.open();
+    waveTimer.start();
+    waveTimerStarted = true;
+  }
+#else
+  const int waveInterrupt = digitalPinToInterrupt(OT_WAVE_TICK_PIN);
+  if (waveInterrupt != NOT_AN_INTERRUPT) {
+    attachInterrupt(waveInterrupt, onWaveTimerTick, RISING);
+  }
+#endif
+}
+
+static void stopWaveTimer() {
+#if OT_HAS_FSP_TIMER
+  if (!waveTimerStarted) {
+    return;
+  }
+
+  waveTimer.stop();
+  waveTimer.close();
+  waveTimerStarted = false;
+#else
+  const int waveInterrupt = digitalPinToInterrupt(OT_WAVE_TICK_PIN);
+  if (waveInterrupt != NOT_AN_INTERRUPT) {
+    detachInterrupt(waveInterrupt);
+  }
+#endif
+}
+
+void ihInitialiseTimer() {
+  // Timer resources are managed by startWaveTimer/stopWaveTimer.
+}
+
+void ihInitialiseInterrupts() {
+  reenableInt1 = true;
+  int1Enabled = true;
+  attachCaptureInterrupts();
+  startWaveTimer();
+}
+
+void ihInitialisePitchMeasurement() {
+  reenableInt1 = false;
+  int1Enabled = false;
+  stopWaveTimer();
+  detachCaptureInterrupts();
 }
 
 void ihInitialiseVolumeMeasurement() {

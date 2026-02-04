@@ -13,9 +13,6 @@ extern volatile uint16_t pitch_counter_l;    // Last value of pitch counter
 extern volatile uint16_t vol_counter;      // Pitch counter
 extern volatile uint16_t vol_counter_l;    // Last value of pitch counter
 
-extern volatile uint16_t timer_overflow_counter;         // counter for frequency measurement
-
-
 extern volatile bool volumeValueAvailable;   // Volume read flag
 extern volatile bool pitchValueAvailable;    // Pitch read flag
 extern volatile bool reenableInt1;    // Pitch read flag

@@ -3,6 +3,10 @@
 
 #include <Arduino.h>
 
+#if !defined(ARDUINO_UNOR4_MINIMA) && !defined(ARDUINO_UNOR4_WIFI)
+#error "This firmware targets Arduino UNO R4 (Minima/WiFi) only."
+#endif
+
 // Shield wiring for the UNO R4 port.
 static const uint8_t OT_BUTTON_PIN = 6;
 static const uint8_t OT_LED1_PIN = 18;  // A4

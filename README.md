@@ -1,13 +1,15 @@
-## Open Theremin V3 with MIDI interface control software V2.9 for Arduino UNO R4
-(For Open Theremin V4 with MIDI, follow this link: https://github.com/MrDham/OpenTheremin_V4_with_MIDI)
+## Open Theremin V3.5 with MIDI interface control software V2.9 for Arduino UNO R4
 
 ### UNO R4 only
 - This repository now targets `Arduino UNO R4` only.
+- Audio tick generation uses UNO R4 timer resources (`FspTimer`) when available.
+- Calibration frequency measurements use interrupt edge counting.
 
-Based on Arduino UNO Software for the Open.Theremin version 3.0  Copyright (C) 2010-2016 by Urs Gaudenz
-https://github.com/GaudiLabs/OpenTheremin_V3
 
-This Open Theremin V3 with MIDI, since version V2.6, also takes into account 
+Based on Arduino UNO Software for the [Open.Theremin version 3.0  Copyright (C) 2010-2016 by Urs Gaudenz](https://github.com/GaudiLabs/OpenTheremin_V3)
+ and [MrDHam's fork](https://github.com/MrDham/OpenTheremin_V3_with_MIDI) 
+
+This Open Theremin V3.5 with MIDI, since version V2.6, also takes into account 
 Changes added in Open.Theremin version 3.1 (all by @Theremingenieur):
 
     Fix a wavetable addressing issue (found by @miguelfreitas)
