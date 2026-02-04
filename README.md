@@ -52,6 +52,7 @@ This githup repository provides the code to add a MIDI interface to the Open The
 5. Upload the code by clicking on the upload button.
 6. Default MIDI transport is USB serial (MIDI byte stream at `OT_MIDI_SERIAL_BAUD`), use a USB-serial MIDI bridge/router on host side.
 7. Experimental native USB-MIDI build targets are available: `uno_r4_minima_usb_midi`, `uno_r4_wifi_usb_midi`.
+8. Native USB-MIDI envs use a project-local patched UNO R4 core in `third_party/framework-arduinorenesas-uno`.
 
 ### MIDI-IN controls (USB serial stream + native USB-MIDI)
 The following controls are handled on `OT_MIDI_IN_CHANNEL`:
