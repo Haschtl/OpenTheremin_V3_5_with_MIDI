@@ -113,6 +113,7 @@ static const uint8_t OT_CC_WAVEMORPH_SPEED = 31;
 static const uint8_t OT_CC_TONETILT_AMOUNT = 32;
 static const uint8_t OT_CC_SOFTCLIP_DRIVE = 33;
 static const uint8_t OT_CC_VIBRATO_JITTER_ENABLE = 34;
+static const uint8_t OT_CC_TONE_PRESET = 35;
 static const uint8_t OT_CC_CAL_ARM = 102;
 static const uint8_t OT_CC_CAL_CONFIRM = 103;
 
@@ -135,6 +136,23 @@ struct MidiPreset {
   uint8_t loopCc;
 };
 
+struct TonePreset {
+  uint8_t wavetable;
+  uint8_t transpose;
+  uint8_t audioRatePreset;
+  uint8_t bendRange;
+  uint8_t volumeTrigger;
+  uint8_t legatoOn;
+  uint8_t pitchBendOn;
+  uint8_t morphOn;
+  uint8_t morphStepQ8;
+  uint8_t tiltOn;
+  uint8_t tiltWetMax;
+  uint8_t softClipOn;
+  uint8_t softClipShift;
+  uint8_t vibratoOn;
+};
+
 static const MidiPreset kMidiPresets[8] = {
   {2, 0, 2, 0,   1, 1, 255, 255, 7},
   {2, 1, 4, 8,   1, 1, 74,  255, 11},
@@ -144,6 +162,22 @@ static const MidiPreset kMidiPresets[8] = {
   {3, 5, 5, 28,  0, 1, 10,  255, 93},
   {2, 6, 48, 32, 1, 1, 19,  255, 71},
   {2, 7, 1, 0,   0, 0, 255, 255, 95},
+};
+
+static const TonePreset kTonePresets[] = {
+  // warm/clean -> bright/modern
+  {0, 2, 2, 2, 4,  1, 1, 1,  2, 1, 170, 1, 26, 1},  // Classic Sing
+  {3, 2, 2, 2, 6,  1, 1, 1,  2, 1, 190, 1, 26, 1},  // Cello Air
+  {4, 2, 2, 4, 8,  1, 1, 1,  3, 1, 165, 1, 25, 1},  // Vocal Lead
+  {5, 2, 2, 7, 10, 1, 1, 1,  4, 1, 145, 1, 24, 1},  // Soft Expressive
+  {6, 2, 2, 12,12, 1, 1, 1,  4, 1, 125, 1, 24, 1},  // Clarinet Glide
+  {7, 2, 2, 12,14, 1, 1, 1,  5, 1, 110, 1, 23, 1},  // Bright Classic
+  {8, 2, 2, 24,16, 1, 1, 1,  6, 1, 95,  1, 23, 1},  // Soft-Saw Warm
+  {9, 2, 2, 24,18, 1, 1, 1,  7, 1, 80,  1, 22, 1},  // Phoenix Edge
+  {10,2, 1, 12,20, 0, 1, 1,  8, 1, 75,  1, 22, 0},  // Modern Mono
+  {11,2, 1, 7, 12, 1, 1, 1, 10, 1, 65,  1, 21, 0},  // Razor Solo
+  {12,2, 2, 12,22, 1, 1, 1, 10, 1, 60,  1, 22, 0},  // PolyBLEP Saw
+  {13,1, 2, 24,24, 0, 1, 1, 12, 1, 55,  1, 21, 0},  // PolyBLEP Pulse
 };
 
 static bool setAudioRatePreset(uint8_t preset) {
@@ -163,6 +197,34 @@ static void resetAudioFeatureDefaults() {
   ihSetWaveMorphStepQ8((OT_WAVEMORPH_STEP_Q8 == 0) ? 1 : OT_WAVEMORPH_STEP_Q8);
   ihSetToneTiltWetMax((OT_TILT_WET_MAX > 255) ? 255 : OT_TILT_WET_MAX);
   ihSetSoftClipCubicShift(OT_SOFTCLIP_CUBIC_SHIFT);
+}
+
+static void applyTonePreset(uint8_t preset) {
+  const uint8_t count = (uint8_t)(sizeof(kTonePresets) / sizeof(kTonePresets[0]));
+  if (preset >= count) {
+    return;
+  }
+
+  const TonePreset &cfg = kTonePresets[preset];
+  vWavetableSelector = min((uint8_t)(OT_WAVETABLE_COUNT - 1U), cfg.wavetable);
+  registerValue = cfg.transpose;
+  setAudioRatePreset(cfg.audioRatePreset);
+  midi_bend_range = cfg.bendRange;
+  midi_volume_trigger = cfg.volumeTrigger;
+  flag_legato_on = cfg.legatoOn ? 1 : 0;
+  flag_pitch_bend_on = cfg.pitchBendOn ? 1 : 0;
+
+  ihSetWaveMorphEnabled(cfg.morphOn != 0);
+  ihSetWaveMorphStepQ8((cfg.morphStepQ8 == 0) ? 1 : cfg.morphStepQ8);
+  ihSetToneTiltEnabled(cfg.tiltOn != 0);
+  ihSetToneTiltWetMax(cfg.tiltWetMax);
+  ihSetSoftClipEnabled(cfg.softClipOn != 0);
+  ihSetSoftClipCubicShift(cfg.softClipShift);
+  ihSetVibratoJitterEnabled(cfg.vibratoOn != 0);
+
+  resetTimer();
+  HW_LED1_TOGGLE;
+  HW_LED2_TOGGLE;
 }
 
 static inline uint16_t median3U16(uint16_t a, uint16_t b, uint16_t c) {
@@ -904,6 +966,13 @@ void Application::midi_handle_cc(uint8_t control, uint8_t value)
     case OT_CC_VIBRATO_JITTER_ENABLE:
       ihSetVibratoJitterEnabled(value >= 64);
       break;
+    case OT_CC_TONE_PRESET: {
+      const uint8_t count = (uint8_t)(sizeof(kTonePresets) / sizeof(kTonePresets[0]));
+      uint16_t idx = ((uint16_t)value * (uint16_t)count) >> 7;
+      if (idx >= count) idx = count - 1U;
+      applyTonePreset((uint8_t)idx);
+      break;
+    }
     case OT_CC_CAL_ARM:
       if (value == OT_CAL_ARM_KEY) {
         calibrationArmed = true;
