@@ -114,7 +114,6 @@ static const uint8_t OT_CC_WAVEMORPH_SPEED = 31;
 static const uint8_t OT_CC_TONETILT_AMOUNT = 32;
 static const uint8_t OT_CC_SOFTCLIP_DRIVE = 33;
 static const uint8_t OT_CC_VIBRATO_JITTER_ENABLE = 34;
-static const uint8_t OT_CC_TONE_PRESET = 35;
 static const uint8_t OT_CC_CAL_ARM = 102;
 static const uint8_t OT_CC_CAL_CONFIRM = 103;
 
@@ -124,18 +123,6 @@ static const uint8_t OT_CAL_CONFIRM_KEY = 99;
 static bool calibrationArmed = false;
 static uint32_t calibrationArmMillis = 0;
 static bool midiCalibrationRequested = false;
-
-struct MidiPreset {
-  uint8_t transpose;
-  uint8_t wavetable;
-  uint8_t bendRange;
-  uint8_t volumeTrigger;
-  uint8_t legatoOn;
-  uint8_t pitchBendOn;
-  uint8_t rodCc;
-  uint8_t rodCcLo;
-  uint8_t loopCc;
-};
 
 struct TonePreset {
   uint8_t wavetable;
@@ -152,17 +139,6 @@ struct TonePreset {
   uint8_t softClipOn;
   uint8_t softClipShift;
   uint8_t vibratoOn;
-};
-
-static const MidiPreset kMidiPresets[8] = {
-  {2, 0, 2, 0,   1, 1, 255, 255, 7},
-  {2, 1, 4, 8,   1, 1, 74,  255, 11},
-  {2, 2, 12, 16, 1, 1, 16,  48,  7},
-  {2, 3, 24, 20, 1, 1, 17,  49,  74},
-  {1, 4, 7, 24,  1, 0, 18,  255, 1},
-  {3, 5, 5, 28,  0, 1, 10,  255, 93},
-  {2, 6, 48, 32, 1, 1, 19,  255, 71},
-  {2, 7, 1, 0,   0, 0, 255, 255, 95},
 };
 
 static const TonePreset kTonePresets[] = {
@@ -885,29 +861,6 @@ void Application::midi_set_mute(bool muted)
   }
 }
 
-void Application::midi_apply_preset(uint8_t preset)
-{
-  if (preset >= 8) {
-    return;
-  }
-
-  const MidiPreset &cfg = kMidiPresets[preset];
-  registerValue = cfg.transpose;
-  vWavetableSelector = min((uint8_t)(OT_WAVETABLE_COUNT - 1U), cfg.wavetable);
-  midi_bend_range = cfg.bendRange;
-  midi_volume_trigger = cfg.volumeTrigger;
-  flag_legato_on = cfg.legatoOn ? 1 : 0;
-  flag_pitch_bend_on = cfg.pitchBendOn ? 1 : 0;
-  rod_midi_cc = cfg.rodCc;
-  rod_midi_cc_lo = cfg.rodCcLo;
-  loop_midi_cc = cfg.loopCc;
-  resetAudioFeatureDefaults();
-
-  resetTimer();
-  HW_LED1_TOGGLE;
-  HW_LED2_TOGGLE;
-}
-
 void Application::midi_handle_cc(uint8_t control, uint8_t value)
 {
   switch (control) {
@@ -969,13 +922,6 @@ void Application::midi_handle_cc(uint8_t control, uint8_t value)
     case OT_CC_VIBRATO_JITTER_ENABLE:
       ihSetVibratoJitterEnabled(value >= 64);
       break;
-    case OT_CC_TONE_PRESET: {
-      const uint8_t count = (uint8_t)(sizeof(kTonePresets) / sizeof(kTonePresets[0]));
-      uint16_t idx = ((uint16_t)value * (uint16_t)count) >> 7;
-      if (idx >= count) idx = count - 1U;
-      applyTonePreset((uint8_t)idx);
-      break;
-    }
     case OT_CC_CAL_ARM:
       if (value == OT_CAL_ARM_KEY) {
         calibrationArmed = true;

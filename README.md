@@ -75,7 +75,6 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - CC `32`: Pitch tilt amount (`0..255` internal wet max).
 - CC `33`: Soft clip drive (higher CC = stronger drive).
 - CC `34`: Subtle vibrato+jitter on/off (`>=64` on).
-- CC `35`: Tone preset select (`0..11` mapped from CC range, sets full preset incl. wavetable).
 - Calibration remote combo: CC `102` value `42`, then within 2s CC `103` value `99`.
 
 Wavetable MIDI reference (for CC `26` / Timbre pot):
@@ -94,7 +93,7 @@ Wavetable MIDI reference (for CC `26` / Timbre pot):
 - `12` PolyBLEP Saw (procedural)
 - `13` PolyBLEP Pulse 50% (procedural)
 
-Tone preset reference (for CC `35`):
+Tone preset reference (for Program Change `0..11`):
 - `0` Classic Sing
 - `1` Cello Air
 - `2` Vocal Lead
