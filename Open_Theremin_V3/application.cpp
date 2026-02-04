@@ -8,6 +8,10 @@
 #include "timer.h"
 #include <EEPROM.h>
 
+#if OT_MIDI_NATIVE_USB
+#error "OT_MIDI_NATIVE_USB=1 requires a UNO R4 core with native USB MIDI descriptor support. Use OT_MIDI_NATIVE_USB=0 for now."
+#endif
+
 const AppMode AppModeValues[] = {MUTE,NORMAL};
 const int16_t PitchCalibrationTolerance = 15;
 const int16_t VolumeCalibrationTolerance = 21;
@@ -684,7 +688,7 @@ void Application::delay_NOP(unsigned long time) {
 void Application::midi_setup() 
 {
   // USB CDC transport for MIDI byte stream.
-  Serial.begin(115200);
+  Serial.begin(OT_MIDI_SERIAL_BAUD);
   _midistate = MIDI_SILENT; 
 }
 

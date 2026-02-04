@@ -30,4 +30,12 @@
 // MIDI IN control channel (0..15 => MIDI channels 1..16).
 #define OT_MIDI_IN_CHANNEL 0
 
+// MIDI transport:
+// 0 = USB serial MIDI byte stream (default, stable)
+// 1 = native USB MIDI class (currently not available with stock UNO R4 core)
+#define OT_MIDI_NATIVE_USB 0
+
+// Baud for USB serial MIDI byte stream when OT_MIDI_NATIVE_USB == 0.
+#define OT_MIDI_SERIAL_BAUD 115200
+
 #endif // _BUILD_H

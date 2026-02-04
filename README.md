@@ -8,6 +8,7 @@
 - Simple preset helper is available via `OT_AUDIO_RATE_PRESET` in `Open_Theremin_V3/build.h`.
 - Optional SPI DMA backend can be enabled with `OT_USE_DMA` in `Open_Theremin_V3/build.h`.
 - MIDI-IN control channel is fixed via `OT_MIDI_IN_CHANNEL` in `Open_Theremin_V3/build.h`.
+- MIDI transport is selected via `OT_MIDI_NATIVE_USB` in `Open_Theremin_V3/build.h`.
 - Calibration frequency measurements use interrupt edge counting.
 
 
@@ -49,7 +50,7 @@ This githup repository provides the code to add a MIDI interface to the Open The
 3. Select the correct arduino board from Tools -> Board (`Arduino UNO R4 Minima` or `Arduino UNO R4 WiFi`).
 4. Select the correct USB port on Tools -> Serial Port.
 5. Upload the code by clicking on the upload button.
-6. MIDI transport is USB serial (MIDI byte stream at 115200 baud), use a USB-serial MIDI bridge/router on host side.
+6. MIDI transport is USB serial (MIDI byte stream at `OT_MIDI_SERIAL_BAUD`), use a USB-serial MIDI bridge/router on host side.
 
 ### MIDI-IN controls (USB serial MIDI stream)
 The following controls are handled on `OT_MIDI_IN_CHANNEL`:
@@ -63,6 +64,8 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - CC `26`: Wavetable select (`0..7` mapped from CC range).
 - CC `27`: Audio tick preset (`31.25k / 40k / 48k`).
 - Calibration remote combo: CC `102` value `42`, then within 2s CC `103` value `99`.
+
+Note: `OT_MIDI_NATIVE_USB=1` is reserved for future native USB-MIDI class support and currently hard-fails on stock UNO R4 core.
 
 ### Added and removed compare to Open Theremin V3. 
 Serial communication implemented for program monitoring purpose was removed (Particularly during calibration).
