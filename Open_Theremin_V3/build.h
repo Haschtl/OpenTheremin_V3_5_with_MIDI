@@ -14,6 +14,12 @@
 // Audio ISR tick rate in Hz (31.25kHz keeps legacy behavior).
 // Original: 31250
 #define OT_AUDIO_TICK_HZ 48000 
+#define OT_AUDIO_TICK_HZ_MIN 20000
+#define OT_AUDIO_TICK_HZ_MAX 96000
+
+// Audio rate preset helper in application.cpp:
+// 0 = 31.25kHz, 1 = 40kHz, 2 = 48kHz, 3 = custom OT_AUDIO_TICK_HZ.
+#define OT_AUDIO_RATE_PRESET 3
 
 // Median filtering for analog pots (odd number, currently supported: 3).
 #define OT_POT_MEDIAN_SAMPLES 3

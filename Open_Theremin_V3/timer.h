@@ -6,14 +6,8 @@
 extern volatile uint32_t timer;
 extern volatile uint32_t midi_timer;
 
-inline uint32_t millisToTicks(uint16_t milliseconds) {
-  return ((uint32_t)milliseconds * (uint32_t)OT_AUDIO_TICK_HZ + 999U) / 1000U;
-}
-
-inline uint16_t ticksToMillis(uint32_t ticks) {
-  const uint32_t milliseconds = (ticks * 1000U + ((uint32_t)OT_AUDIO_TICK_HZ / 2U)) / (uint32_t)OT_AUDIO_TICK_HZ;
-  return (milliseconds > 0xFFFFU) ? 0xFFFFU : (uint16_t)milliseconds;
-}
+uint32_t millisToTicks(uint16_t milliseconds);
+uint16_t ticksToMillis(uint32_t ticks);
 
 inline void resetTimer() {
   timer = 0;

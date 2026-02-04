@@ -31,6 +31,16 @@ static inline void SPImcpDACtransmit(uint16_t data)
   SPI.transfer16(data);
 }
 
+static inline uint16_t SPImcpDACformatA(uint16_t data)
+{
+  return (uint16_t)((data & 0x0FFFU) | 0x7000U);
+}
+
+static inline uint16_t SPImcpDACformatB(uint16_t data)
+{
+  return (uint16_t)((data & 0x0FFFU) | 0xF000U);
+}
+
 static inline void SPImcpDAClatch()
 {
   digitalWriteFast(OT_DAC_LDAC_PIN, LOW);
@@ -40,18 +50,21 @@ static inline void SPImcpDAClatch()
 static inline void SPImcpDACsend(uint16_t data)
 {
   digitalWriteFast(OT_DAC1_CS_PIN, LOW);
-  data &= 0x0FFF;
-  data |= 0x7000;
-  SPImcpDACtransmit(data);
+  SPImcpDACtransmit(SPImcpDACformatA(data));
+  digitalWriteFast(OT_DAC1_CS_PIN, HIGH);
+}
+
+static inline void SPImcpDACsendPrepared(uint16_t dataWithConfig)
+{
+  digitalWriteFast(OT_DAC1_CS_PIN, LOW);
+  SPImcpDACtransmit(dataWithConfig);
   digitalWriteFast(OT_DAC1_CS_PIN, HIGH);
 }
 
 static inline void SPImcpDAC2Asend(uint16_t data)
 {
   digitalWriteFast(OT_DAC2_CS_PIN, LOW);
-  data &= 0x0FFF;
-  data |= 0x7000;
-  SPImcpDACtransmit(data);
+  SPImcpDACtransmit(SPImcpDACformatA(data));
   digitalWriteFast(OT_DAC2_CS_PIN, HIGH);
   SPImcpDAClatch();
 }
@@ -59,9 +72,7 @@ static inline void SPImcpDAC2Asend(uint16_t data)
 static inline void SPImcpDAC2Bsend(uint16_t data)
 {
   digitalWriteFast(OT_DAC2_CS_PIN, LOW);
-  data &= 0x0FFF;
-  data |= 0xF000;
-  SPImcpDACtransmit(data);
+  SPImcpDACtransmit(SPImcpDACformatB(data));
   digitalWriteFast(OT_DAC2_CS_PIN, HIGH);
   SPImcpDAClatch();
 }

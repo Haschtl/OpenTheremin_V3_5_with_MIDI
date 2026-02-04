@@ -63,6 +63,7 @@ static FspTimer waveTimer;
 static bool waveTimerStarted = false;
 static uint8_t waveTimerType = GPT_TIMER;
 static int8_t waveTimerChannel = -1;
+static volatile uint32_t currentAudioTickHz = OT_AUDIO_TICK_HZ;
 
 static inline uint16_t readTimerCounter16() {
   // 1MHz monotonic source converted to ~16MHz virtual ticks for legacy math.
@@ -83,7 +84,7 @@ static inline void runWaveTick() {
 #else
   const int16_t waveSample = wavetables[vWavetableSelector][offset];
   const uint32_t scaledSample = ((int32_t)waveSample * (uint32_t)vScaledVolume) >> 16;
-  SPImcpDACsend(scaledSample + MCP_DAC_BASE);
+  SPImcpDACsendPrepared(SPImcpDACformatA(scaledSample + MCP_DAC_BASE));
   pointer += vPointerIncrement;
 #endif
 
@@ -179,7 +180,7 @@ static void startWaveTimer() {
     for (;;) { }
   }
 
-  waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, (float)OT_AUDIO_TICK_HZ, 0.0f, onWaveTimerTick);
+  waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, (float)currentAudioTickHz, 0.0f, onWaveTimerTick);
   waveTimer.setup_overflow_irq();
   waveTimer.open();
   waveTimer.start();
@@ -216,4 +217,31 @@ void ihInitialisePitchMeasurement() {
 
 void ihInitialiseVolumeMeasurement() {
   ihInitialisePitchMeasurement();
+}
+
+uint32_t ihGetAudioTickHz() {
+  return currentAudioTickHz;
+}
+
+bool ihSetAudioTickHz(uint32_t hz) {
+  if (hz < OT_AUDIO_TICK_HZ_MIN || hz > OT_AUDIO_TICK_HZ_MAX) {
+    return false;
+  }
+
+  const bool restart = waveTimerStarted;
+  if (restart) {
+    stopWaveTimer();
+  }
+
+  noInterrupts();
+  currentAudioTickHz = hz;
+  timer = 0;
+  midi_timer = 0;
+  interrupts();
+
+  if (restart) {
+    startWaveTimer();
+  }
+
+  return true;
 }

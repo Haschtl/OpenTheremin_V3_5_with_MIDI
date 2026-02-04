@@ -37,6 +37,8 @@ void ihInitialiseTimer();
 void ihInitialiseInterrupts();
 void ihInitialisePitchMeasurement();
 void ihInitialiseVolumeMeasurement();
+uint32_t ihGetAudioTickHz();
+bool ihSetAudioTickHz(uint32_t hz);
 void resetPitchFlag();
 void resetVolFlag();
 void savePitchCounter();

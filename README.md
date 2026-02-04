@@ -4,6 +4,8 @@
 - This repository now targets `Arduino UNO R4` only.
 - Audio tick generation requires UNO R4 hardware timer resources (`FspTimer`).
 - Audio tick rate is configurable in `Open_Theremin_V3/build.h` (`OT_AUDIO_TICK_HZ`).
+- Audio tick rate can also be changed at runtime via `ihSetAudioTickHz(hz)` (range in `build.h`).
+- Simple preset helper is available via `OT_AUDIO_RATE_PRESET` in `Open_Theremin_V3/build.h`.
 - Calibration frequency measurements use interrupt edge counting.
 
 

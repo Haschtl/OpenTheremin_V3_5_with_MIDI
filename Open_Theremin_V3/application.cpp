@@ -84,6 +84,15 @@ static const uint16_t OT_CALIBRATION_PRESS_MS = 480;
 static const uint16_t OT_LED_RESTORE_MS = 2080;
 static const uint16_t OT_MIDI_UPDATE_MS = 3;
 
+static bool setAudioRatePreset(uint8_t preset) {
+  switch (preset) {
+    case 0: return ihSetAudioTickHz(31250U);
+    case 1: return ihSetAudioTickHz(40000U);
+    case 2: return ihSetAudioTickHz(48000U);
+    default: return ihSetAudioTickHz((uint32_t)OT_AUDIO_TICK_HZ);
+  }
+}
+
 static inline uint16_t median3U16(uint16_t a, uint16_t b, uint16_t c) {
   if (a > b) { const uint16_t t = a; a = b; b = t; }
   if (b > c) { const uint16_t t = b; b = c; c = t; }
@@ -172,6 +181,9 @@ void Application::setup() {
   digitalWrite(Application::LED_PIN_1, HIGH);    // turn the LED off by making the voltage LOW
 
    SPImcpDACinit();
+  if (!setAudioRatePreset(OT_AUDIO_RATE_PRESET)) {
+    for (;;) { }
+  }
 
 EEPROM.get(0,pitchDAC);
 EEPROM.get(2,volumeDAC);
