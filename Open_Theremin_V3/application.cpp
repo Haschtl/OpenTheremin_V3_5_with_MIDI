@@ -8,8 +8,21 @@
 #include "timer.h"
 #include <EEPROM.h>
 
-#if OT_MIDI_NATIVE_USB
-#error "OT_MIDI_NATIVE_USB=1 requires a UNO R4 core with native USB MIDI descriptor support. Use OT_MIDI_NATIVE_USB=0 for now."
+#if OT_MIDI_NATIVE_USB && defined(OT_MIDI_BACKEND_TINYUSB_RAW)
+#if !defined(CFG_TUD_MIDI) || (CFG_TUD_MIDI != 1)
+#error "OT_MIDI_BACKEND_TINYUSB_RAW needs CFG_TUD_MIDI=1."
+#endif
+extern "C" {
+#include "tusb.h"
+#include "class/midi/midi_device.h"
+}
+#define OT_HAS_NATIVE_USB_MIDI 1
+#else
+#define OT_HAS_NATIVE_USB_MIDI 0
+#endif
+
+#if OT_MIDI_NATIVE_USB && !OT_HAS_NATIVE_USB_MIDI
+#error "OT_MIDI_NATIVE_USB=1 but no native USB MIDI backend is active. Define OT_MIDI_BACKEND_TINYUSB_RAW=1 (and provide core/linker support), or disable OT_MIDI_NATIVE_USB."
 #endif
 
 const AppMode AppModeValues[] = {MUTE,NORMAL};
@@ -162,6 +175,75 @@ static uint8_t midi_in_running_status = 0;
 static uint8_t midi_in_data1 = 0;
 static uint8_t midi_in_expected = 0;
 static bool midi_in_has_data1 = false;
+
+#if OT_HAS_NATIVE_USB_MIDI
+static uint8_t midi_usb_payload[3] = {0, 0, 0};
+static uint8_t midi_usb_payload_size = 0;
+static uint8_t midi_usb_payload_pos = 0;
+#endif
+
+static inline void midiTransportBegin() {
+#if OT_HAS_NATIVE_USB_MIDI
+  // USB stack is started by core init.
+#else
+  Serial.begin(OT_MIDI_SERIAL_BAUD);
+#endif
+}
+
+static inline void midiTransportWrite3(uint8_t status, uint8_t data1, uint8_t data2) {
+#if OT_HAS_NATIVE_USB_MIDI
+  const uint8_t msg[3] = {status, data1, data2};
+  if (tud_midi_mounted()) {
+    (void)tud_midi_stream_write(0, msg, sizeof(msg));
+  }
+#else
+  Serial.write(status);
+  Serial.write(data1);
+  Serial.write(data2);
+#endif
+}
+
+static inline bool midiTransportReadByte(uint8_t *out) {
+#if OT_HAS_NATIVE_USB_MIDI
+  while (true) {
+    if (midi_usb_payload_pos < midi_usb_payload_size) {
+      *out = midi_usb_payload[midi_usb_payload_pos++];
+      return true;
+    }
+
+    uint8_t packet[4];
+    if (!tud_midi_packet_read(packet)) {
+      return false;
+    }
+
+    const uint8_t cin = packet[0] & 0x0F;
+    if (cin == 0x5 || cin == 0xF) {
+      midi_usb_payload_size = 1;
+    } else if (cin == 0x2 || cin == 0x6 || cin == 0xC || cin == 0xD) {
+      midi_usb_payload_size = 2;
+    } else {
+      midi_usb_payload_size = 3;
+    }
+
+    midi_usb_payload[0] = packet[1];
+    midi_usb_payload[1] = packet[2];
+    midi_usb_payload[2] = packet[3];
+    midi_usb_payload_pos = 0;
+  }
+#else
+  if (Serial.available() <= 0) {
+    return false;
+  }
+  *out = (uint8_t)Serial.read();
+  return true;
+#endif
+}
+
+static inline void midiTransportService() {
+#if OT_HAS_NATIVE_USB_MIDI
+  tud_task();
+#endif
+}
 
 static void onPitchMeasureEdge() {
   pitch_measure_edges++;
@@ -687,8 +769,7 @@ void Application::delay_NOP(unsigned long time) {
 
 void Application::midi_setup() 
 {
-  // USB CDC transport for MIDI byte stream.
-  Serial.begin(OT_MIDI_SERIAL_BAUD);
+  midiTransportBegin();
   _midistate = MIDI_SILENT; 
 }
 
@@ -696,14 +777,12 @@ void Application::midi_setup()
 void Application::midi_msg_send(uint8_t channel, uint8_t midi_cmd1, uint8_t midi_cmd2, uint8_t midi_value) 
 {
   const uint8_t status = (midi_cmd1 & 0xF0) | (channel & 0x0F);
-  Serial.write(status);
-  Serial.write(midi_cmd2);
-  Serial.write(midi_value);
+  midiTransportWrite3(status, midi_cmd2, midi_value);
 }
 
 void Application::midi_flush()
 {
-  // No explicit flush required for Serial transport.
+  midiTransportService();
 }
 
 void Application::midi_set_mute(bool muted)
@@ -801,8 +880,9 @@ void Application::midi_input_poll()
     calibrationArmed = false;
   }
 
-  while (Serial.available() > 0) {
-    const uint8_t byteIn = (uint8_t) Serial.read();
+  midiTransportService();
+  uint8_t byteIn = 0;
+  while (midiTransportReadByte(&byteIn)) {
 
     if (byteIn & 0x80) {
       midi_in_running_status = byteIn;

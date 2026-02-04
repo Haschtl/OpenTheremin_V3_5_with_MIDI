@@ -32,10 +32,14 @@
 
 // MIDI transport:
 // 0 = USB serial MIDI byte stream (default, stable)
-// 1 = native USB MIDI class (currently not available with stock UNO R4 core)
+// 1 = native USB MIDI class (requires UNO R4 core with TinyUSB MIDI descriptor support)
+#ifndef OT_MIDI_NATIVE_USB
 #define OT_MIDI_NATIVE_USB 0
+#endif
 
 // Baud for USB serial MIDI byte stream when OT_MIDI_NATIVE_USB == 0.
+#ifndef OT_MIDI_SERIAL_BAUD
 #define OT_MIDI_SERIAL_BAUD 115200
+#endif
 
 #endif // _BUILD_H
