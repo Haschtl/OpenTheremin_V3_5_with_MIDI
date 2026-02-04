@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include "build.h"
+#include "error_indicator.h"
 
 #if OT_USE_DMA
 #include "spimcpdac_backend.h"
@@ -40,7 +41,12 @@ static inline void SPImcpDACinit()
 
 #if OT_USE_DMA
   if (!otSpiDmaInit(OT_SPI_CLOCK_HZ)) {
-    for (;;) { }
+#if OT_DMA_HARDFAIL
+    fatalErrorLoop(OT_ERR_DMA);
+#else
+    setErrorIndicator(OT_ERR_DMA);
+    return;
+#endif
   }
 #else
   SPI.begin();
@@ -56,7 +62,15 @@ static inline void SPImcpDACtransmit(uint16_t data)
     interrupts();
   }
   if (!otSpiDmaTransfer16(data)) {
-    for (;;) { }
+#if OT_DMA_HARDFAIL
+    fatalErrorLoop(OT_ERR_DMA);
+#else
+    setErrorIndicator(OT_ERR_DMA);
+    if (irqWasDisabled) {
+      noInterrupts();
+    }
+    return;
+#endif
   }
   if (irqWasDisabled) {
     noInterrupts();

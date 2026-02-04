@@ -15,6 +15,8 @@
 #define OT_USE_DMA 0
 // DMA transfer timeout budget per 16-bit SPI frame.
 #define OT_DMA_TRANSFER_TIMEOUT_US 200
+// 0 = keep running on DMA frame errors (recommended for live), 1 = hard-fail.
+#define OT_DMA_HARDFAIL 0
 
 // Audio ISR tick rate in Hz (31.25kHz keeps legacy behavior).
 // Original: 31250

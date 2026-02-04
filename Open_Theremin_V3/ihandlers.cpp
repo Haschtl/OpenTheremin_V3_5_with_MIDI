@@ -5,6 +5,7 @@
 #include "timer.h"
 #include "pins.h"
 #include "wavetables.h"
+#include "error_indicator.h"
 
 #include "build.h"
 #include <math.h>
@@ -448,7 +449,7 @@ static void startWaveTimer() {
 
   if (waveTimerChannel < 0) {
     // Hard fail by design: no fallback timer source allowed.
-    for (;;) { }
+    fatalErrorLoop(OT_ERR_TIMER);
   }
 
   waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, (float)currentAudioTickHz, 0.0f, onWaveTimerTick);

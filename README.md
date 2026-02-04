@@ -8,6 +8,8 @@
 - Simple preset helper is available via `OT_AUDIO_RATE_PRESET` in `Open_Theremin_V3/build.h`.
 - Optional SPI DMA backend can be enabled with `OT_USE_DMA` in `Open_Theremin_V3/build.h`.
 - DMA backend now includes strict transfer-open checks and per-frame timeout via `OT_DMA_TRANSFER_TIMEOUT_US`.
+- Live-safe default: DMA frame timeout does not hard-stop audio (`OT_DMA_HARDFAIL=0`), it flags LED error and continues.
+- Central LED error indicator is active (`setErrorIndicator` / `fatalErrorLoop`): blink code `1`=DMA, `2`=Timer, `3`=Audio-rate setup.
 - MIDI-IN control channel is fixed via `OT_MIDI_IN_CHANNEL` in `Open_Theremin_V3/build.h`.
 - MIDI transport is selected via `OT_MIDI_NATIVE_USB` in `Open_Theremin_V3/build.h` (or `build_flags` in `platformio.ini`).
 - Calibration frequency measurements use interrupt edge counting.
@@ -57,7 +59,7 @@ This githup repository provides the code to add a MIDI interface to the Open The
 
 ### MIDI-IN controls (USB serial stream + native USB-MIDI)
 The following controls are handled on `OT_MIDI_IN_CHANNEL`:
-- Program Change `0..7`: recall one of 8 live presets.
+- Program Change `0..11`: recall one of 12 tone presets.
 - CC `20`: Mute toggle (`>=64` mute, `<64` normal).
 - CC `21`: Panic (All Notes Off).
 - CC `22`: Legato (`>=64` on).
@@ -73,7 +75,7 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - CC `32`: Pitch tilt amount (`0..255` internal wet max).
 - CC `33`: Soft clip drive (higher CC = stronger drive).
 - CC `34`: Subtle vibrato+jitter on/off (`>=64` on).
-- CC `35`: Tone preset select (`0..11` mapped from CC range, sets multiple synth params + wavetable).
+- CC `35`: Tone preset select (`0..11` mapped from CC range, sets full preset incl. wavetable).
 - Calibration remote combo: CC `102` value `42`, then within 2s CC `103` value `99`.
 
 Wavetable MIDI reference (for CC `26` / Timbre pot):
@@ -105,6 +107,7 @@ Tone preset reference (for CC `35`):
 - `9` Razor Solo
 - `10` PolyBLEP Saw
 - `11` PolyBLEP Pulse
+Program Change values above `11` are ignored.
 
 When selecting a timbre preset (MIDI Program Change or waveform preset via pot), audio feature defaults are restored.
 

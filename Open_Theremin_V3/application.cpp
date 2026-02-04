@@ -7,6 +7,7 @@
 #include "ihandlers.h"
 #include "timer.h"
 #include "wavetables.h"
+#include "error_indicator.h"
 #include <EEPROM.h>
 
 #if OT_MIDI_NATIVE_USB && defined(OT_MIDI_BACKEND_TINYUSB_RAW)
@@ -359,6 +360,7 @@ Application::Application()
 
 void Application::setup() {
 
+  clearErrorIndicator();
   HW_LED1_ON;HW_LED2_OFF;
 
   pinMode(Application::BUTTON_PIN, INPUT_PULLUP);
@@ -372,7 +374,7 @@ void Application::setup() {
 
    SPImcpDACinit();
   if (!setAudioRatePreset(OT_AUDIO_RATE_PRESET)) {
-    for (;;) { }
+    fatalErrorLoop(OT_ERR_AUDIO_RATE);
   }
 
 EEPROM.get(0,pitchDAC);
@@ -455,6 +457,7 @@ void Application::loop() {
   volumePotValue   = readPotLegacy(VOLUME_POT);
   
   set_parameters ();
+  serviceErrorIndicator();
   midi_input_poll();
   midi_flush();
   
@@ -1023,7 +1026,10 @@ void Application::midi_input_poll()
         const uint8_t type = midi_in_running_status & 0xF0;
         const uint8_t channel = midi_in_running_status & 0x0F;
         if (channel == OT_MIDI_IN_CHANNEL && type == 0xC0) {
-          midi_apply_preset(midi_in_data1 & 0x07);
+          const uint8_t tonePresetCount = (uint8_t)(sizeof(kTonePresets) / sizeof(kTonePresets[0]));
+          if (midi_in_data1 < tonePresetCount) {
+            applyTonePreset(midi_in_data1);
+          }
         }
         midi_in_has_data1 = false;
       }
