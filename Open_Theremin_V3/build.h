@@ -13,6 +13,8 @@
 
 // Optional SPI DMA backend (UNO R4 FSP SPI + DTC path).
 #define OT_USE_DMA 0
+// DMA transfer timeout budget per 16-bit SPI frame.
+#define OT_DMA_TRANSFER_TIMEOUT_US 200
 
 // Audio ISR tick rate in Hz (31.25kHz keeps legacy behavior).
 // Original: 31250

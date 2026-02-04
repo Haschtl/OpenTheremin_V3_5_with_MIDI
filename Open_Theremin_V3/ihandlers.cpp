@@ -341,13 +341,7 @@ static inline void runWaveTick() {
   } else if (dacValue > 4095) {
     dacValue = 4095;
   }
-#if OT_USE_DMA
-  interrupts();
-#endif
   SPImcpDACsendPrepared(SPImcpDACformatA((uint16_t)dacValue));
-#if OT_USE_DMA
-  noInterrupts();
-#endif
 
   uint16_t phaseIncrement = vPointerIncrement;
   if (vibratoJitterEnabled) {

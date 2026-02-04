@@ -9,6 +9,7 @@
 
 static volatile bool g_spiTransferDone = false;
 static volatile bool g_spiTransferError = false;
+static volatile bool g_spiTransferBusy = false;
 
 static spi_cfg_t g_spiCfg;
 static spi_extended_cfg_t g_spiExtCfg;
@@ -43,11 +44,15 @@ bool otSpiDmaInit(uint32_t clockHz) {
   g_spiCfg.p_callback = otSpiCallback;
   g_spiCfg.p_context = nullptr;
 
-  if (g_spiCfg.p_transfer_tx) {
-    g_spiCfg.p_transfer_tx->p_api->open(g_spiCfg.p_transfer_tx->p_ctrl, g_spiCfg.p_transfer_tx->p_cfg);
+  if (!g_spiCfg.p_transfer_tx || !g_spiCfg.p_transfer_rx) {
+    return false;
   }
-  if (g_spiCfg.p_transfer_rx) {
-    g_spiCfg.p_transfer_rx->p_api->open(g_spiCfg.p_transfer_rx->p_ctrl, g_spiCfg.p_transfer_rx->p_cfg);
+
+  if (FSP_SUCCESS != g_spiCfg.p_transfer_tx->p_api->open(g_spiCfg.p_transfer_tx->p_ctrl, g_spiCfg.p_transfer_tx->p_cfg)) {
+    return false;
+  }
+  if (FSP_SUCCESS != g_spiCfg.p_transfer_rx->p_api->open(g_spiCfg.p_transfer_rx->p_ctrl, g_spiCfg.p_transfer_rx->p_cfg)) {
+    return false;
   }
 
   g_spi0.p_api->close(&g_spi0_ctrl);
@@ -62,22 +67,33 @@ bool otSpiDmaInit(uint32_t clockHz) {
 }
 
 bool otSpiDmaTransfer16(uint16_t data) {
+  if (!g_spiInitDone || g_spiTransferBusy) {
+    return false;
+  }
+
   uint16_t rxDummy = 0;
 
+  g_spiTransferBusy = true;
   g_spiTransferDone = false;
   g_spiTransferError = false;
 
   fsp_err_t err = g_spi0.p_api->writeRead(&g_spi0_ctrl, &data, &rxDummy, 1, SPI_BIT_WIDTH_16_BITS);
   if (err != FSP_SUCCESS) {
+    g_spiTransferBusy = false;
     return false;
   }
 
-  uint32_t timeout = 50000;
-  while (!g_spiTransferDone && timeout--) {
+  const uint32_t startUs = micros();
+  while (!g_spiTransferDone) {
+    if ((uint32_t)(micros() - startUs) > OT_DMA_TRANSFER_TIMEOUT_US) {
+      g_spiTransferBusy = false;
+      return false;
+    }
     __asm__ __volatile__("nop");
   }
 
-  return g_spiTransferDone && !g_spiTransferError;
+  g_spiTransferBusy = false;
+  return !g_spiTransferError;
 }
 
 #else

@@ -7,6 +7,7 @@
 - Audio tick rate can also be changed at runtime via `ihSetAudioTickHz(hz)` (range in `build.h`).
 - Simple preset helper is available via `OT_AUDIO_RATE_PRESET` in `Open_Theremin_V3/build.h`.
 - Optional SPI DMA backend can be enabled with `OT_USE_DMA` in `Open_Theremin_V3/build.h`.
+- DMA backend now includes strict transfer-open checks and per-frame timeout via `OT_DMA_TRANSFER_TIMEOUT_US`.
 - MIDI-IN control channel is fixed via `OT_MIDI_IN_CHANNEL` in `Open_Theremin_V3/build.h`.
 - MIDI transport is selected via `OT_MIDI_NATIVE_USB` in `Open_Theremin_V3/build.h` (or `build_flags` in `platformio.ini`).
 - Calibration frequency measurements use interrupt edge counting.

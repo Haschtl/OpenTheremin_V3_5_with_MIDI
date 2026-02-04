@@ -18,6 +18,17 @@
 #define digitalWriteFast digitalWrite
 #endif
 
+static inline uint32_t otGetPrimask()
+{
+#if defined(__ARM_ARCH)
+  uint32_t value;
+  __asm__ __volatile__("MRS %0, primask" : "=r"(value));
+  return value;
+#else
+  return 0U;
+#endif
+}
+
 static inline void SPImcpDACinit()
 {
   pinMode(OT_DAC_LDAC_PIN, OUTPUT);
@@ -40,8 +51,15 @@ static inline void SPImcpDACinit()
 static inline void SPImcpDACtransmit(uint16_t data)
 {
 #if OT_USE_DMA
+  const bool irqWasDisabled = (otGetPrimask() != 0U);
+  if (irqWasDisabled) {
+    interrupts();
+  }
   if (!otSpiDmaTransfer16(data)) {
     for (;;) { }
+  }
+  if (irqWasDisabled) {
+    noInterrupts();
   }
 #else
   SPI.transfer16(data);
