@@ -69,6 +69,7 @@ static uint32_t midi_key_follow = 2048; ;
 static uint8_t registerValue = 2;
   // wavetable selector is defined and initialized in ihandlers.cpp
 static uint8_t midi_channel = OT_MIDI_IN_CHANNEL;
+static uint8_t midi_in_channel = OT_MIDI_IN_CHANNEL;
 static uint8_t midi_bend_range = 2;
 static uint8_t midi_volume_trigger = 0;
 static uint8_t flag_legato_on = 1;
@@ -113,6 +114,7 @@ static const uint8_t OT_CC_WAVEMORPH_SPEED = 31;
 static const uint8_t OT_CC_TONETILT_AMOUNT = 32;
 static const uint8_t OT_CC_SOFTCLIP_DRIVE = 33;
 static const uint8_t OT_CC_VIBRATO_JITTER_ENABLE = 34;
+static const uint8_t OT_CC_MIDI_CHANNEL_SET = 36;
 static const uint8_t OT_CC_CAL_ARM = 102;
 static const uint8_t OT_CC_CAL_CONFIRM = 103;
 
@@ -122,6 +124,7 @@ static const uint8_t OT_CAL_CONFIRM_KEY = 99;
 static bool calibrationArmed = false;
 static uint32_t calibrationArmMillis = 0;
 static bool midiCalibrationRequested = false;
+static const int OT_EEPROM_ADDR_MIDI_CHANNEL = 12;
 
 struct TonePreset {
   uint8_t wavetable;
@@ -173,6 +176,22 @@ static void resetAudioFeatureDefaults() {
   ihSetWaveMorphStepQ8((OT_WAVEMORPH_STEP_Q8 == 0) ? 1 : OT_WAVEMORPH_STEP_Q8);
   ihSetToneTiltWetMax((OT_TILT_WET_MAX > 255) ? 255 : OT_TILT_WET_MAX);
   ihSetSoftClipCubicShift(OT_SOFTCLIP_CUBIC_SHIFT);
+}
+
+static void loadMidiChannelPersistent() {
+  uint8_t stored = 0xFF;
+  EEPROM.get(OT_EEPROM_ADDR_MIDI_CHANNEL, stored);
+  if (stored <= 15U) {
+    midi_channel = stored;
+    midi_in_channel = stored;
+  } else {
+    midi_channel = OT_MIDI_IN_CHANNEL;
+    midi_in_channel = OT_MIDI_IN_CHANNEL;
+  }
+}
+
+static void saveMidiChannelPersistent() {
+  EEPROM.put(OT_EEPROM_ADDR_MIDI_CHANNEL, midi_channel);
 }
 
 static void applyTonePreset(uint8_t preset) {
@@ -366,7 +385,8 @@ initialiseInterrupts();
   EEPROM.get(4,pitchCalibrationBase);
   EEPROM.get(8,volCalibrationBase);
  
-  init_parameters();
+ init_parameters();
+ loadMidiChannelPersistent();
  resetAudioFeatureDefaults();
  midi_setup();
   
@@ -921,6 +941,16 @@ void Application::midi_handle_cc(uint8_t control, uint8_t value)
     case OT_CC_VIBRATO_JITTER_ENABLE:
       ihSetVibratoJitterEnabled(value >= 64);
       break;
+    case OT_CC_MIDI_CHANNEL_SET: {
+      const uint8_t newChannel = min((uint8_t)15U, (uint8_t)(value >> 3));
+      if (newChannel != midi_channel || newChannel != midi_in_channel) {
+        midi_msg_send(midi_channel, 0xB0, 0x7B, 0x00);
+        midi_channel = newChannel;
+        midi_in_channel = newChannel;
+        saveMidiChannelPersistent();
+      }
+      break;
+    }
     case OT_CC_CAL_ARM:
       if (value == OT_CAL_ARM_KEY) {
         calibrationArmed = true;
@@ -970,7 +1000,7 @@ void Application::midi_input_poll()
       if (midi_in_expected == 1) {
         const uint8_t type = midi_in_running_status & 0xF0;
         const uint8_t channel = midi_in_running_status & 0x0F;
-        if (channel == OT_MIDI_IN_CHANNEL && type == 0xC0) {
+        if (channel == midi_in_channel && type == 0xC0) {
           const uint8_t tonePresetCount = (uint8_t)(sizeof(kTonePresets) / sizeof(kTonePresets[0]));
           if (midi_in_data1 < tonePresetCount) {
             applyTonePreset(midi_in_data1);
@@ -984,7 +1014,7 @@ void Application::midi_input_poll()
     const uint8_t data2 = byteIn;
     const uint8_t type = midi_in_running_status & 0xF0;
     const uint8_t channel = midi_in_running_status & 0x0F;
-    if (channel == OT_MIDI_IN_CHANNEL && type == 0xB0) {
+    if (type == 0xB0 && (channel == midi_in_channel || midi_in_data1 == OT_CC_MIDI_CHANNEL_SET)) {
       midi_handle_cc(midi_in_data1, data2);
     }
     midi_in_has_data1 = false;
