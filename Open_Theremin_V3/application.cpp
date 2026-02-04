@@ -71,6 +71,15 @@ static uint16_t old_data_pot_value = 0;
 static uint16_t param_pot_value = 0; 
 static uint16_t old_param_pot_value = 0; 
 
+static const uint8_t OT_ADC_READ_BITS = 14;
+static const uint8_t OT_ADC_LEGACY_BITS = 10;
+static const uint8_t OT_ADC_DOWNSHIFT = OT_ADC_READ_BITS - OT_ADC_LEGACY_BITS;
+
+static inline uint16_t readPotLegacy(uint8_t pin) {
+  const uint16_t raw = analogRead(pin);
+  return (OT_ADC_DOWNSHIFT > 0) ? (raw >> OT_ADC_DOWNSHIFT) : raw;
+}
+
 static volatile uint32_t pitch_measure_edges = 0;
 static volatile uint32_t volume_measure_edges = 0;
 
@@ -118,6 +127,7 @@ void Application::setup() {
   pinMode(Application::LED_PIN_2,    OUTPUT);
   pinMode(OT_VOLUME_CAPTURE_PIN, INPUT);
   pinMode(OT_PITCH_CAPTURE_PIN, INPUT);
+  analogReadResolution(OT_ADC_READ_BITS);
 
   digitalWrite(Application::LED_PIN_1, HIGH);    // turn the LED off by making the voltage LOW
 
@@ -198,8 +208,8 @@ void Application::loop() {
 
   mloop:                   // Main loop avoiding the GCC "optimization"
 
-  pitchPotValue    = analogRead(PITCH_POT);
-  volumePotValue   = analogRead(VOLUME_POT);
+  pitchPotValue    = readPotLegacy(PITCH_POT);
+  volumePotValue   = readPotLegacy(VOLUME_POT);
   
   set_parameters ();
   
@@ -879,10 +889,10 @@ void Application::init_parameters ()
 {
   // init data pot value to avoid 1st position to be taken into account
 
-  param_pot_value = analogRead(REGISTER_SELECT_POT);
+  param_pot_value = readPotLegacy(REGISTER_SELECT_POT);
   old_param_pot_value = param_pot_value;
 
-  data_pot_value = analogRead(WAVE_SELECT_POT);
+  data_pot_value = readPotLegacy(WAVE_SELECT_POT);
   old_data_pot_value = data_pot_value;
 }
 
@@ -890,8 +900,8 @@ void Application::set_parameters ()
 {
   uint16_t data_steps;
   
-  param_pot_value = analogRead(REGISTER_SELECT_POT);
-  data_pot_value = analogRead(WAVE_SELECT_POT);
+  param_pot_value = readPotLegacy(REGISTER_SELECT_POT);
+  data_pot_value = readPotLegacy(WAVE_SELECT_POT);
 
   // If parameter pot moved
   if (abs((int32_t)param_pot_value - (int32_t)old_param_pot_value) >= 8)
