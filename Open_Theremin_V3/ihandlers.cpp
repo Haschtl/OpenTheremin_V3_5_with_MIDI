@@ -7,6 +7,7 @@
 #include "wavetables.h"
 
 #include "build.h"
+#include <math.h>
 
 #if __has_include(<FspTimer.h>)
   #include <FspTimer.h>
@@ -22,6 +23,8 @@
 #endif
 
 static const uint32_t MCP_DAC_BASE = 2048;
+static const uint8_t BIQUAD_COEF_SHIFT = 14;
+static const uint8_t BIQUAD_TABLE_SIZE = 32;
 
 const int16_t* const wavetables[] = {
   sine_table,
@@ -56,13 +59,28 @@ static volatile uint16_t pointer = 0;
 static volatile uint8_t debounce_p = 0;
 static volatile uint8_t debounce_v = 0;
 static volatile uint16_t wavetableMorphQ8 = 0;
-static volatile int32_t toneFilterState = 0;
 static volatile bool waveMorphEnabled = (OT_WAVEMORPH_ENABLE_DEFAULT != 0);
 static volatile bool toneTiltEnabled = (OT_TILT_ENABLE_DEFAULT != 0);
 static volatile bool softClipEnabled = (OT_SOFTCLIP_ENABLE_DEFAULT != 0);
+static volatile bool vibratoJitterEnabled = (OT_VIBRATO_ENABLE_DEFAULT != 0);
 static volatile uint8_t waveMorphStepQ8 = (OT_WAVEMORPH_STEP_Q8 == 0) ? 1 : OT_WAVEMORPH_STEP_Q8;
 static volatile uint8_t toneTiltWetMax = (OT_TILT_WET_MAX > 255) ? 255 : OT_TILT_WET_MAX;
 static volatile uint8_t softClipCubicShift = OT_SOFTCLIP_CUBIC_SHIFT;
+static volatile uint32_t vibratoPhaseQ32 = 0;
+static volatile uint32_t vibratoRateQ32 = 0;
+static volatile uint32_t jitterState = 0x1234ABCDUL;
+static volatile int32_t biquadZ1 = 0;
+static volatile int32_t biquadZ2 = 0;
+
+struct BiquadCoeff {
+  int32_t b0;
+  int32_t b1;
+  int32_t b2;
+  int32_t a1;
+  int32_t a2;
+};
+
+static BiquadCoeff biquadTable[BIQUAD_TABLE_SIZE];
 
 static volatile bool int1Enabled = false;
 static volatile uint16_t pitch_capture_counter_i = 0;
@@ -76,6 +94,89 @@ static volatile uint32_t currentAudioTickHz = OT_AUDIO_TICK_HZ;
 static inline uint16_t readTimerCounter16() {
   // 1MHz monotonic source converted to ~16MHz virtual ticks for legacy math.
   return (uint16_t)((micros() * 16UL) & 0xFFFF);
+}
+
+static inline void updateVibratoRate() {
+  const uint32_t hz = currentAudioTickHz;
+  if (hz == 0 || OT_VIBRATO_HZ_X100 == 0) {
+    vibratoRateQ32 = 0;
+    return;
+  }
+  const uint64_t num = (uint64_t)OT_VIBRATO_HZ_X100 * 4294967296ULL;
+  const uint64_t den = (uint64_t)hz * 100ULL;
+  vibratoRateQ32 = (uint32_t)(num / den);
+}
+
+static inline int16_t nextJitterSample() {
+  jitterState = jitterState * 1664525UL + 1013904223UL;
+  return (int16_t)(jitterState >> 16);
+}
+
+static inline void buildLowpassBiquad(float cutoffHz, float sampleHz, float q, BiquadCoeff &out) {
+  if (cutoffHz < 40.0f) {
+    cutoffHz = 40.0f;
+  }
+  const float nyquist = sampleHz * 0.5f;
+  if (cutoffHz > nyquist * 0.45f) {
+    cutoffHz = nyquist * 0.45f;
+  }
+
+  const float w0 = 2.0f * 3.14159265358979323846f * cutoffHz / sampleHz;
+  const float cw = cosf(w0);
+  const float sw = sinf(w0);
+  const float alpha = sw / (2.0f * q);
+
+  const float a0 = 1.0f + alpha;
+  const float b0 = ((1.0f - cw) * 0.5f) / a0;
+  const float b1 = (1.0f - cw) / a0;
+  const float b2 = ((1.0f - cw) * 0.5f) / a0;
+  const float a1 = (-2.0f * cw) / a0;
+  const float a2 = (1.0f - alpha) / a0;
+
+  const float scale = (float)(1 << BIQUAD_COEF_SHIFT);
+  out.b0 = (int32_t)(b0 * scale);
+  out.b1 = (int32_t)(b1 * scale);
+  out.b2 = (int32_t)(b2 * scale);
+  out.a1 = (int32_t)(a1 * scale);
+  out.a2 = (int32_t)(a2 * scale);
+}
+
+static inline void rebuildBiquadTable() {
+  const float fs = (float)currentAudioTickHz;
+  if (fs < 1000.0f) {
+    for (uint8_t i = 0; i < BIQUAD_TABLE_SIZE; ++i) {
+      biquadTable[i].b0 = (1 << BIQUAD_COEF_SHIFT);
+      biquadTable[i].b1 = 0;
+      biquadTable[i].b2 = 0;
+      biquadTable[i].a1 = 0;
+      biquadTable[i].a2 = 0;
+    }
+    return;
+  }
+  const float q = ((OT_TILT_BIQUAD_Q_X1000 <= 0) ? 707.0f : (float)OT_TILT_BIQUAD_Q_X1000) / 1000.0f;
+  const float cutoffMax = (OT_TILT_CUTOFF_MAX_HZ < 200) ? 200.0f : (float)OT_TILT_CUTOFF_MAX_HZ;
+  const float cutoffMinRaw = (OT_TILT_CUTOFF_MIN_HZ < 80) ? 80.0f : (float)OT_TILT_CUTOFF_MIN_HZ;
+  const float cutoffMin = (cutoffMinRaw > cutoffMax) ? cutoffMax : cutoffMinRaw;
+
+  for (uint8_t i = 0; i < BIQUAD_TABLE_SIZE; ++i) {
+    const float t = (float)i / (float)(BIQUAD_TABLE_SIZE - 1);
+    // Higher pitch index => lower cutoff for more classic theremin darkening.
+    const float cutoff = cutoffMax - ((cutoffMax - cutoffMin) * t);
+    buildLowpassBiquad(cutoff, fs, q, biquadTable[i]);
+  }
+}
+
+static inline int32_t processTiltBiquad(int32_t x, const BiquadCoeff &c) {
+  const int32_t yQ = c.b0 * x + biquadZ1;
+  int32_t y = yQ >> BIQUAD_COEF_SHIFT;
+  biquadZ1 = c.b1 * x - c.a1 * y + biquadZ2;
+  biquadZ2 = c.b2 * x - c.a2 * y;
+  if (y > 4095) {
+    y = 4095;
+  } else if (y < -4096) {
+    y = -4096;
+  }
+  return y;
 }
 
 static inline int16_t readInterpolatedSample(const int16_t *table, uint16_t index, uint8_t frac) {
@@ -149,16 +250,11 @@ static inline void runWaveTick() {
                                   : (uint16_t)pointerIncrementSigned;
 
   if (toneTiltEnabled) {
-    // Darken very high notes a bit to get closer to classic theremin timbre.
-    uint8_t filterShift = 2;
-    if (absIncrement > 3072U) {
-      filterShift = 5;
-    } else if (absIncrement > 1536U) {
-      filterShift = 4;
-    } else if (absIncrement > 768U) {
-      filterShift = 3;
+    uint8_t biquadIdx = (uint8_t)(absIncrement >> 7);
+    if (biquadIdx >= BIQUAD_TABLE_SIZE) {
+      biquadIdx = BIQUAD_TABLE_SIZE - 1;
     }
-    toneFilterState += (waveSample - toneFilterState) >> filterShift;
+    const int32_t filtered = processTiltBiquad(waveSample, biquadTable[biquadIdx]);
 
     uint8_t wet = 0;
     if (absIncrement > OT_TILT_START_INCREMENT) {
@@ -166,9 +262,10 @@ static inline void runWaveTick() {
       const uint16_t wetMax = (uint16_t)toneTiltWetMax;
       wet = (wetRaw > wetMax) ? (uint8_t)wetMax : (uint8_t)wetRaw;
     }
-    waveSample += ((toneFilterState - waveSample) * (int32_t)wet) >> 8;
+    waveSample += ((filtered - waveSample) * (int32_t)wet) >> 8;
   } else {
-    toneFilterState = waveSample;
+    biquadZ1 = 0;
+    biquadZ2 = 0;
   }
 
   int32_t scaledSample = (waveSample * (int32_t)vScaledVolume) >> 16;
@@ -186,7 +283,30 @@ static inline void runWaveTick() {
 #if OT_USE_DMA
   noInterrupts();
 #endif
-  pointer += vPointerIncrement;
+
+  uint16_t phaseIncrement = vPointerIncrement;
+  if (vibratoJitterEnabled) {
+    vibratoPhaseQ32 += vibratoRateQ32;
+
+    const uint16_t saw = (uint16_t)(vibratoPhaseQ32 >> 16);
+    const uint16_t tri = (saw < 32768U) ? (uint16_t)(saw << 1) : (uint16_t)((65535U - saw) << 1);
+    const int32_t triSigned = (int32_t)tri - 32768;
+    const int32_t vibPpm = (triSigned * (int32_t)OT_VIBRATO_DEPTH_PPM) / 32768;
+
+    const int32_t jitPpm = ((int32_t)nextJitterSample() * (int32_t)OT_JITTER_DEPTH_PPM) / 32768;
+    const int32_t modPpm = vibPpm + jitPpm;
+
+    const int32_t base = (int16_t)vPointerIncrement;
+    int32_t modulated = base + (int32_t)(((int64_t)base * (int64_t)modPpm) / 1000000LL);
+    if (modulated > 32767) {
+      modulated = 32767;
+    } else if (modulated < -32768) {
+      modulated = -32768;
+    }
+    phaseIncrement = (uint16_t)((int16_t)modulated);
+  }
+
+  pointer += phaseIncrement;
 #endif
 
   incrementTimer();
@@ -297,7 +417,11 @@ void ihInitialiseInterrupts() {
   reenableInt1 = true;
   int1Enabled = true;
   wavetableMorphQ8 = ((uint16_t)(vWavetableSelector & 0x07U)) << 8;
-  toneFilterState = 0;
+  biquadZ1 = 0;
+  biquadZ2 = 0;
+  rebuildBiquadTable();
+  updateVibratoRate();
+  vibratoPhaseQ32 = 0;
   attachCaptureInterrupts();
   startWaveTimer();
 }
@@ -332,6 +456,8 @@ bool ihSetAudioTickHz(uint32_t hz) {
   timer = 0;
   midi_timer = 0;
   interrupts();
+  rebuildBiquadTable();
+  updateVibratoRate();
 
   if (restart) {
     startWaveTimer();
@@ -381,6 +507,12 @@ void ihSetSoftClipCubicShift(uint8_t cubicShift) {
   interrupts();
 }
 
+void ihSetVibratoJitterEnabled(bool enabled) {
+  noInterrupts();
+  vibratoJitterEnabled = enabled;
+  interrupts();
+}
+
 bool ihGetWaveMorphEnabled() {
   return waveMorphEnabled;
 }
@@ -391,6 +523,10 @@ bool ihGetToneTiltEnabled() {
 
 bool ihGetSoftClipEnabled() {
   return softClipEnabled;
+}
+
+bool ihGetVibratoJitterEnabled() {
+  return vibratoJitterEnabled;
 }
 
 uint8_t ihGetWaveMorphStepQ8() {

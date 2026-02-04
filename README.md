@@ -71,6 +71,7 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - CC `31`: Wavetable morph speed (`1..16` internal range).
 - CC `32`: Pitch tilt amount (`0..255` internal wet max).
 - CC `33`: Soft clip drive (higher CC = stronger drive).
+- CC `34`: Subtle vibrato+jitter on/off (`>=64` on).
 - Calibration remote combo: CC `102` value `42`, then within 2s CC `103` value `99`.
 
 When selecting a timbre preset (MIDI Program Change or waveform preset via pot), audio feature defaults are restored.

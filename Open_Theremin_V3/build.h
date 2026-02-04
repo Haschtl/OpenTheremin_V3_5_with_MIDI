@@ -34,12 +34,21 @@
 #define OT_WAVEMORPH_ENABLE_DEFAULT 1
 #define OT_TILT_ENABLE_DEFAULT 1
 #define OT_SOFTCLIP_ENABLE_DEFAULT 1
+#define OT_VIBRATO_ENABLE_DEFAULT 1
 // Start pitch-dependent darkening when absolute phase increment exceeds this value.
 #define OT_TILT_START_INCREMENT 512
 // Max wet amount (0..255) for pitch-dependent darkening blend.
 #define OT_TILT_WET_MAX 160
+// 2-pole tilt filter tuning.
+#define OT_TILT_BIQUAD_Q_X1000 707
+#define OT_TILT_CUTOFF_MAX_HZ 8000
+#define OT_TILT_CUTOFF_MIN_HZ 1800
 // Soft-clip enable and drive (lower shift => stronger saturation).
 #define OT_SOFTCLIP_CUBIC_SHIFT 24
+// Subtle vibrato/jitter tuning (applied to oscillator phase increment).
+#define OT_VIBRATO_HZ_X100 500
+#define OT_VIBRATO_DEPTH_PPM 2500
+#define OT_JITTER_DEPTH_PPM 700
 
 // MIDI IN control channel (0..15 => MIDI channels 1..16).
 #define OT_MIDI_IN_CHANNEL 0

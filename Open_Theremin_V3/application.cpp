@@ -111,6 +111,7 @@ static const uint8_t OT_CC_SOFTCLIP_ENABLE = 30;
 static const uint8_t OT_CC_WAVEMORPH_SPEED = 31;
 static const uint8_t OT_CC_TONETILT_AMOUNT = 32;
 static const uint8_t OT_CC_SOFTCLIP_DRIVE = 33;
+static const uint8_t OT_CC_VIBRATO_JITTER_ENABLE = 34;
 static const uint8_t OT_CC_CAL_ARM = 102;
 static const uint8_t OT_CC_CAL_CONFIRM = 103;
 
@@ -157,6 +158,7 @@ static void resetAudioFeatureDefaults() {
   ihSetWaveMorphEnabled(OT_WAVEMORPH_ENABLE_DEFAULT != 0);
   ihSetToneTiltEnabled(OT_TILT_ENABLE_DEFAULT != 0);
   ihSetSoftClipEnabled(OT_SOFTCLIP_ENABLE_DEFAULT != 0);
+  ihSetVibratoJitterEnabled(OT_VIBRATO_ENABLE_DEFAULT != 0);
   ihSetWaveMorphStepQ8((OT_WAVEMORPH_STEP_Q8 == 0) ? 1 : OT_WAVEMORPH_STEP_Q8);
   ihSetToneTiltWetMax((OT_TILT_WET_MAX > 255) ? 255 : OT_TILT_WET_MAX);
   ihSetSoftClipCubicShift(OT_SOFTCLIP_CUBIC_SHIFT);
@@ -496,8 +498,8 @@ void Application::loop() {
     vol_v = max(vol_v, 0);
     loop_hand_pos = vol_v >> 4;
 
-    // Give vScaledVolume a pseudo-exponential characteristic:
-    vScaledVolume = loop_hand_pos * (loop_hand_pos + 2);
+    // Exponential-ish volume curve with full 16-bit headroom.
+    vScaledVolume = (uint16_t)((uint32_t)loop_hand_pos * (uint32_t)loop_hand_pos);
     
     volumeValueAvailable = false;
   }
@@ -894,6 +896,9 @@ void Application::midi_handle_cc(uint8_t control, uint8_t value)
       ihSetSoftClipCubicShift(shift);
       break;
     }
+    case OT_CC_VIBRATO_JITTER_ENABLE:
+      ihSetVibratoJitterEnabled(value >= 64);
+      break;
     case OT_CC_CAL_ARM:
       if (value == OT_CAL_ARM_KEY) {
         calibrationArmed = true;
