@@ -2,10 +2,10 @@
 
 #include "timer.h"
 
-volatile uint16_t timer = 0;
-volatile uint16_t midi_timer = 0;
+volatile uint32_t timer = 0;
+volatile uint32_t midi_timer = 0;
 
-void ticktimer (uint16_t ticks) {
+void ticktimer (uint32_t ticks) {
   resetTimer();
   while (timerUnexpired(ticks))
     ;  // NOP

@@ -22,7 +22,6 @@
 #endif
 
 static const uint32_t MCP_DAC_BASE = 2048;
-static const float OT_AUDIO_TICK_HZ = 31250.0f;
 
 const int16_t* const wavetables[] = {
   sine_table,
@@ -180,7 +179,7 @@ static void startWaveTimer() {
     for (;;) { }
   }
 
-  waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, OT_AUDIO_TICK_HZ, 0.0f, onWaveTimerTick);
+  waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, (float)OT_AUDIO_TICK_HZ, 0.0f, onWaveTimerTick);
   waveTimer.setup_overflow_irq();
   waveTimer.open();
   waveTimer.start();

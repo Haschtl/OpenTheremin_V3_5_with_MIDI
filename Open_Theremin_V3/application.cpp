@@ -79,6 +79,10 @@ static uint16_t old_param_pot_value = 0;
 static const uint8_t OT_ADC_READ_BITS = 14;
 static const uint8_t OT_ADC_LEGACY_BITS = 10;
 static const uint8_t OT_ADC_DOWNSHIFT = OT_ADC_READ_BITS - OT_ADC_LEGACY_BITS;
+static const uint16_t OT_MODE_TOGGLE_PRESS_MS = 48;
+static const uint16_t OT_CALIBRATION_PRESS_MS = 480;
+static const uint16_t OT_LED_RESTORE_MS = 2080;
+static const uint16_t OT_MIDI_UPDATE_MS = 3;
 
 static inline uint16_t median3U16(uint16_t a, uint16_t b, uint16_t c) {
   if (a > b) { const uint16_t t = a; a = b; b = t; }
@@ -259,7 +263,7 @@ void Application::loop() {
 
   if (_state == CALIBRATING && HW_BUTTON_RELEASED) 
   {
-    if (timerExpired(1500)) 
+    if (timerExpiredMillis(OT_MODE_TOGGLE_PRESS_MS)) 
     {
          _mode = nextMode();
          if (_mode==NORMAL) 
@@ -278,7 +282,7 @@ void Application::loop() {
     _state = PLAYING;
   };
 
-  if (_state == CALIBRATING && timerExpired(15000)) 
+  if (_state == CALIBRATING && timerExpiredMillis(OT_CALIBRATION_PRESS_MS)) 
   {
     HW_LED1_OFF; HW_LED2_ON;
   
@@ -358,7 +362,7 @@ void Application::loop() {
     volumeValueAvailable = false;
   }
 
-  if (midi_timer > 100) // run midi app every 100 ticks equivalent to approximatevely 3 ms to avoid synth's overload
+  if (midi_timer >= millisToTicks(OT_MIDI_UPDATE_MS))
   {
     midi_application ();
     midi_timer = 0; 
@@ -756,9 +760,10 @@ void Application::midi_application ()
       old_midi_bend = new_midi_bend;
 
       // Calculate velocity
-      if (midi_timer != 0)
+      const uint16_t midiElapsedMs = ticksToMillis(midi_timer);
+      if (midiElapsedMs != 0)
       {
-        calculated_velocity = ((127 - midi_volume_trigger) >> 1 ) + (VELOCITY_SENS * midi_volume_trigger * delta_loop_cc_val / midi_timer);
+        calculated_velocity = ((127 - midi_volume_trigger) >> 1 ) + (VELOCITY_SENS * midi_volume_trigger * delta_loop_cc_val / midiElapsedMs);
         midi_velocity = min (abs (calculated_velocity), 127);
       }
       else 
@@ -1171,7 +1176,7 @@ void Application::set_parameters ()
 
   else
   {
-    if (timerExpired(65000))
+    if (timerExpiredMillis(OT_LED_RESTORE_MS))
     //restore LED status
     {
       if (_mode == NORMAL)
