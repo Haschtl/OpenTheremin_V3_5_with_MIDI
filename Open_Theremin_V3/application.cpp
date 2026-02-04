@@ -68,8 +68,7 @@ static uint32_t midi_key_follow = 2048; ;
 // Configuration parameters
 static uint8_t registerValue = 2;
   // wavetable selector is defined and initialized in ihandlers.cpp
-static uint8_t midi_channel = 0;
-static uint8_t old_midi_channel = 0;
+static uint8_t midi_channel = OT_MIDI_IN_CHANNEL;
 static uint8_t midi_bend_range = 2;
 static uint8_t midi_volume_trigger = 0;
 static uint8_t flag_legato_on = 1;
@@ -1320,6 +1319,18 @@ void Application::set_parameters ()
       break;
       
     case 1:
+      // Tone preset
+      {
+        const uint8_t presetCount = (uint8_t)(sizeof(kTonePresets) / sizeof(kTonePresets[0]));
+        data_steps = (uint16_t)(((uint32_t)data_pot_value * (uint32_t)presetCount) >> 10);
+        if (data_steps >= presetCount) {
+          data_steps = presetCount - 1U;
+        }
+        applyTonePreset((uint8_t)data_steps);
+      }
+      break;
+
+    case 2:
       // Waveform
       data_steps = (uint16_t)(((uint32_t)data_pot_value * (uint32_t)OT_WAVETABLE_COUNT) >> 10);
       if (data_steps >= OT_WAVETABLE_COUNT) {
@@ -1327,18 +1338,6 @@ void Application::set_parameters ()
       }
       vWavetableSelector = (uint8_t)data_steps;
       resetAudioFeatureDefaults();
-      break;
-      
-    case 2:
-      // Channel
-      data_steps = data_pot_value >> 6;
-      midi_channel = (uint8_t)(data_steps & 0x000F);
-      if (old_midi_channel != midi_channel)
-      {
-        // Send all note off to avoid stuck notes
-        midi_msg_send(old_midi_channel, 0xB0, 0x7B, 0x00);
-        old_midi_channel = midi_channel;
-      }
       break;
         
     case 3:

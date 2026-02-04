@@ -157,8 +157,8 @@ Let's consider a Fade-in / Picth Variation / Fade-out sequence (I use right hand
   "Timbre" pot becomes "Parameter's Value" and have a variable number of positions depending on selected parameter: 
  
  1. Register: 3 positions (-1 Octave, center, +1 Octave) as in original Open Theremin V3 (version V3.1)
- 2. Timbre: 8 positions as in original Open Theremin V3
- 3. Channel: 16 positions (channel 1 to 16)
+ 2. Tone Preset: 12 positions (same set as Program Change 0..11)
+ 3. Timbre / Wavetable: 14 positions (0..13, see MIDI reference above)
  4. Rod antenna mode: 4 positions 
      (Legato off/Pitch Bend off, Legato off/Pitch Bend on, Legato on/Pitch Bend off, Legato on/Pitch Bend on)
  5. Pitch bend range: 8 positions (1, 2, 4, 5, 7, 12, 24, 48 Semitones). 
@@ -173,6 +173,8 @@ Let's consider a Fade-in / Picth Variation / Fade-out sequence (I use right hand
     
  8. Loop antenna MIDI CC: 8 positions 
     (1-Modulation, 7-Volume, 11-Expression, 71-Resonnance, 74-Cutoff, 91-Reverb, 93-Chorus, 95-Phaser)
+
+MIDI channel is fixed in firmware (`OT_MIDI_IN_CHANNEL` / `midi_channel`).
 
 Select a Parameter and move "Parameter's Value" to change corresponding setting. 
 
@@ -189,7 +191,7 @@ Volume trigger = 127 (Maximum) won't generate any NOTE ON. It can be used to gen
 Manipulation of "Rod antenna MIDI CC" and "Loop antenna MIDI CC" is not error proof. MIDI newbies should be advised to change their value in MUTE mode. 
 
  
-Default configuration is: Register = Center, Timbre = 1st Waveform, Channel = MIDI Channel 1, Rod antenna mode = Legato on/Pitch Bend on, Pitch bend range = 2 Semitones, Volume trigger = 0, Rod antenna MIDI CC = None, Loop antenna MIDI CC = 7-Volume. 
+Default configuration is: Register = Center, Tone Preset = Classic Sing, Timbre = Wavetable 0, Rod antenna mode = Legato on/Pitch Bend on, Pitch bend range = 2 Semitones, Volume trigger = 0, Rod antenna MIDI CC = None, Loop antenna MIDI CC = 7-Volume. 
 
 
 MUTE BUTTON: 
