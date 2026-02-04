@@ -63,7 +63,7 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - CC `23`: Pitch Bend enable (`>=64` on).
 - CC `24`: Pitch Bend range (mapped to `1,2,4,5,7,12,24,48`).
 - CC `25`: Volume trigger (`0..127`).
-- CC `26`: Wavetable select (`0..11` mapped from CC range).
+- CC `26`: Wavetable select (`0..13` mapped from CC range).
 - CC `27`: Audio tick preset (`31.25k / 40k / 48k`).
 - CC `28`: Wavetable morph on/off (`>=64` on).
 - CC `29`: Pitch tilt filter on/off (`>=64` on).
@@ -87,11 +87,13 @@ Wavetable MIDI reference (for CC `26` / Timbre pot):
 - `9` Bright Sinus B (`sine_table7`)
 - `10` Soft-Saw (`sine_table10`)
 - `11` Phoenix / Brightest (`sine_table2`)
+- `12` PolyBLEP Saw (procedural)
+- `13` PolyBLEP Pulse 50% (procedural)
 
 When selecting a timbre preset (MIDI Program Change or waveform preset via pot), audio feature defaults are restored.
 
 Additional timbres were added: Triangle-Vocal, Soft-Saw, Clarinet, and Cello.
-Wavetable order is arranged roughly from warm/dark to bright/edgy across indices `0..11`.
+Wavetable order is arranged roughly from warm/dark to bright/edgy across indices `0..13`.
 
 Note: native USB-MIDI depends on UNO R4 core support (`CFG_TUD_MIDI=1` + MIDI interface descriptor availability).
 

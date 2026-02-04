@@ -191,6 +191,51 @@ static inline int16_t readInterpolatedSample(const int16_t *table, uint16_t inde
   return (int16_t)(a + (((b - a) * (int32_t)frac) >> 6));
 }
 
+static inline float polyBlep(float t, float dt) {
+  if (dt <= 0.0f) {
+    return 0.0f;
+  }
+  if (t < dt) {
+    t /= dt;
+    return (t + t) - (t * t) - 1.0f;
+  }
+  if (t > (1.0f - dt)) {
+    t = (t - 1.0f) / dt;
+    return (t * t) + (t + t) + 1.0f;
+  }
+  return 0.0f;
+}
+
+static inline int16_t readPolyBlepSample(uint8_t mode, float phase, float dt) {
+  float y = 0.0f;
+  if (mode == OT_WAVETABLE_TABLE_COUNT) {
+    // PolyBLEP saw
+    y = (2.0f * phase) - 1.0f;
+    y -= polyBlep(phase, dt);
+  } else {
+    // PolyBLEP pulse (50% duty)
+    y = (phase < 0.5f) ? 1.0f : -1.0f;
+    y += polyBlep(phase, dt);
+    float t2 = phase + 0.5f;
+    if (t2 >= 1.0f) {
+      t2 -= 1.0f;
+    }
+    y -= polyBlep(t2, dt);
+  }
+
+  int32_t s = (int32_t)(y * 1900.0f);
+  if (s > 2047) s = 2047;
+  if (s < -2048) s = -2048;
+  return (int16_t)s;
+}
+
+static inline int16_t readWaveSampleByIndex(uint8_t idx, uint16_t offset, uint8_t frac, float phase, float dt) {
+  if (idx < OT_WAVETABLE_TABLE_COUNT) {
+    return readInterpolatedSample(wavetables[idx], offset, frac);
+  }
+  return readPolyBlepSample(idx, phase, dt);
+}
+
 static inline int16_t softClip12Bit(int32_t x) {
   if (x > 2047) {
     x = 2047;
@@ -221,6 +266,7 @@ static inline void runWaveTick() {
 
   const uint16_t offset = (uint16_t)(pointer >> 6) & 0x3FFU;
   const uint8_t frac = (uint8_t)(pointer & 0x3FU);
+  const float phase = (float)pointer / 65536.0f;
 
 #if CV_ENABLED
   #error "CV_ENABLED is not supported on UNO R4 backend"
@@ -245,9 +291,21 @@ static inline void runWaveTick() {
   const uint8_t tableBlend = (uint8_t)(wavetableMorphQ8 & 0xFFU);
   const uint8_t tableB = (tableA < tableMax) ? (tableA + 1U) : tableMax;
 
-  int32_t waveSample = readInterpolatedSample(wavetables[tableA], offset, frac);
+  const int16_t pointerIncrementSignedForDt = (int16_t)vPointerIncrement;
+  uint16_t absIncrementForDt = (pointerIncrementSignedForDt < 0)
+                                 ? (uint16_t)(-pointerIncrementSignedForDt)
+                                 : (uint16_t)pointerIncrementSignedForDt;
+  if (absIncrementForDt == 0) {
+    absIncrementForDt = 1;
+  }
+  float dt = (float)absIncrementForDt / 65536.0f;
+  if (dt > 0.45f) {
+    dt = 0.45f;
+  }
+
+  int32_t waveSample = readWaveSampleByIndex(tableA, offset, frac, phase, dt);
   if (tableBlend > 0U) {
-    const int32_t waveSampleB = readInterpolatedSample(wavetables[tableB], offset, frac);
+    const int32_t waveSampleB = readWaveSampleByIndex(tableB, offset, frac, phase, dt);
     waveSample += ((waveSampleB - waveSample) * (int32_t)tableBlend) >> 8;
   }
 

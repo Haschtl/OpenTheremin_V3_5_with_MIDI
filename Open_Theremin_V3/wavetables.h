@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include "pgmspace_compat.h"
 
-#define OT_WAVETABLE_COUNT 12
+#define OT_WAVETABLE_TABLE_COUNT 12
+#define OT_WAVETABLE_COUNT 14
 
 extern const int16_t sine_table[1024] PROGMEM;
 extern const int16_t sine_table2[1024] PROGMEM;
