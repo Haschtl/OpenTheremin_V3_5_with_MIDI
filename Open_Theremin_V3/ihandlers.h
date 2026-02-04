@@ -1,6 +1,8 @@
 #ifndef _IHANDLERS_H
 #define _IHANDLERS_H
 
+#include "Arduino.h"
+
 extern volatile uint16_t pitch;              // Pitch value
 extern volatile uint16_t vol;                // Volume value
 extern volatile uint16_t vScaledVolume;      // Volume byte
@@ -29,8 +31,10 @@ inline void saveVolCounter()   { vol_counter_l=vol_counter; };
 
 inline void setWavetableSampleAdvance(uint16_t val) { vPointerIncrement = val;}
 
-inline void disableInt1() { EIMSK &= ~ (1 << INT1); }
-inline void enableInt1()  { if (reenableInt1) EIMSK |=   (1 << INT1); }
+void ihDisableInt1();
+void ihEnableInt1();
+inline void disableInt1() { ihDisableInt1(); }
+inline void enableInt1()  { ihEnableInt1(); }
 
 void ihInitialiseTimer();
 void ihInitialiseInterrupts();

@@ -1,19 +1,40 @@
 #ifndef _HW_H
 #define _HW_H
 
-#define HW_BUTTON_STATE    (PIND & (1<<PORTD6))
-#define HW_BUTTON_PRESSED  (HW_BUTTON_STATE == LOW)
-#define HW_BUTTON_RELEASED (HW_BUTTON_STATE != LOW)
+#include "pins.h"
 
-#define HW_LED1_ON          (PORTC |= (1<<PORTC4))
-#define HW_LED1_OFF         (PORTC &= ~(1<<PORTC4))
+inline bool hwButtonPressed() {
+  return digitalRead(OT_BUTTON_PIN) == LOW;
+}
 
-#define HW_LED2_ON          (PORTC |= (1<<PORTC5))
-#define HW_LED2_OFF         (PORTC &= ~(1<<PORTC5))
+inline void hwLed1Set(bool on) {
+  digitalWrite(OT_LED1_PIN, on ? HIGH : LOW);
+}
 
-#define HW_LED1_TOGGLE      (PORTC = PORTC ^ (1<<PORTC4))
-#define HW_LED2_TOGGLE      (PORTC = PORTC ^ (1<<PORTC5))
+inline void hwLed2Set(bool on) {
+  digitalWrite(OT_LED2_PIN, on ? HIGH : LOW);
+}
+
+inline void hwLed1Toggle() {
+  digitalWrite(OT_LED1_PIN, !digitalRead(OT_LED1_PIN));
+}
+
+inline void hwLed2Toggle() {
+  digitalWrite(OT_LED2_PIN, !digitalRead(OT_LED2_PIN));
+}
+
+#define HW_BUTTON_STATE    (digitalRead(OT_BUTTON_PIN))
+#define HW_BUTTON_PRESSED  (hwButtonPressed())
+#define HW_BUTTON_RELEASED (!hwButtonPressed())
+
+#define HW_LED1_ON         (hwLed1Set(true))
+#define HW_LED1_OFF        (hwLed1Set(false))
+
+#define HW_LED2_ON         (hwLed2Set(true))
+#define HW_LED2_OFF        (hwLed2Set(false))
+
+#define HW_LED1_TOGGLE     (hwLed1Toggle())
+#define HW_LED2_TOGGLE     (hwLed2Toggle())
 
 #endif // _HW_H
-
 

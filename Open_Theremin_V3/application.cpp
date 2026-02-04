@@ -6,7 +6,7 @@
 #include "SPImcpDAC.h"
 #include "ihandlers.h"
 #include "timer.h"
-#include "EEPROM.h"
+#include <EEPROM.h>
 
 const AppMode AppModeValues[] = {MUTE,NORMAL};
 const int16_t PitchCalibrationTolerance = 15;
@@ -84,6 +84,9 @@ void Application::setup() {
   pinMode(Application::BUTTON_PIN, INPUT_PULLUP);
   pinMode(Application::LED_PIN_1,    OUTPUT);
   pinMode(Application::LED_PIN_2,    OUTPUT);
+  pinMode(OT_WAVE_TICK_PIN, INPUT);
+  pinMode(OT_VOLUME_CAPTURE_PIN, INPUT);
+  pinMode(OT_PITCH_CAPTURE_PIN, INPUT);
 
   digitalWrite(Application::LED_PIN_1, HIGH);    // turn the LED off by making the voltage LOW
 
@@ -126,68 +129,43 @@ void Application::InitialiseVolumeMeasurement() {
 
 unsigned long Application::GetQMeasurement()
 {
-  int qn=0;
-  
-  TCCR1B = (1<<CS10);	
-
-while(!(PIND & (1<<PORTD3)));
-while((PIND & (1<<PORTD3)));
-
-TCNT1 = 0;
-  timer_overflow_counter = 0;
-while(qn<31250){
-while(!(PIND & (1<<PORTD3)));
-qn++;
-while((PIND & (1<<PORTD3)));
-};
-
- 
-  
-  TCCR1B = 0;	
-
- unsigned long frequency = TCNT1;
- unsigned long temp = 65536*(unsigned long)timer_overflow_counter;
-  frequency += temp;
-
-return frequency;
+  // On non-AVR targets we use API timers, so no oscillator-to-clock correction is needed.
+  return 16000000UL;
 
 }
 
 
 unsigned long Application::GetPitchMeasurement()
 {
-  TCNT1 = 0;
-  timer_overflow_counter = 0;
-  TCCR1B = (1<<CS12) | (1<<CS11) | (1<<CS10);	
-
-  delay(1000);  
-  
-  TCCR1B = 0;	
-
- unsigned long frequency = TCNT1;
- unsigned long temp = 65536*(unsigned long)timer_overflow_counter;
-  frequency += temp;
-
-return frequency;
+  const unsigned long window_us = 1000000UL;
+  unsigned long edges = 0;
+  bool prev = digitalRead(OT_PITCH_CAPTURE_PIN);
+  const unsigned long start = micros();
+  while ((micros() - start) < window_us) {
+    const bool now = digitalRead(OT_PITCH_CAPTURE_PIN);
+    if (now && !prev) {
+      edges++;
+    }
+    prev = now;
+  }
+  return edges;
 
 }
 
 unsigned long Application::GetVolumeMeasurement()
-{timer_overflow_counter = 0;
-
-  TCNT0=0;
-  TCNT1=49911;
-  TCCR0B = (1<<CS02) | (1<<CS01) | (1<<CS00);	 // //External clock source on T0 pin. Clock on rising edge.
-  TIFR1  = (1<<TOV1);        //Timer1 INT Flag Reg: Clear Timer Overflow Flag
-
-while(!(TIFR1&((1<<TOV1)))); // on Timer 1 overflow (1s)
-  TCCR0B = 0;	 // Stop TimerCounter 0
- unsigned long frequency = TCNT0; // get counter 0 value
- unsigned long temp = (unsigned long)timer_overflow_counter; // and overflow counter
-
- frequency += temp*256;
-
-return frequency;
+{
+  const unsigned long window_us = 1000000UL;
+  unsigned long edges = 0;
+  bool prev = digitalRead(OT_VOLUME_CAPTURE_PIN);
+  const unsigned long start = micros();
+  while ((micros() - start) < window_us) {
+    const bool now = digitalRead(OT_VOLUME_CAPTURE_PIN);
+    if (now && !prev) {
+      edges++;
+    }
+    prev = now;
+  }
+  return edges;
 }
 
 
@@ -273,7 +251,7 @@ void Application::loop() {
   };
 
 #if CV_ENABLED
-  OCR0A = pitch & 0xff;
+  #error "CV_ENABLED is not supported on UNO R4 backend"
 #endif
 
 

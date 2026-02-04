@@ -1,8 +1,8 @@
-## Open Theremin V3 with MIDI interface control software V2.9 for Arduino UNO
+## Open Theremin V3 with MIDI interface control software V2.9 for Arduino UNO R4
 (For Open Theremin V4 with MIDI, follow this link: https://github.com/MrDham/OpenTheremin_V4_with_MIDI)
 
-
-
+### UNO R4 only
+- This repository now targets `Arduino UNO R4` only.
 
 Based on Arduino UNO Software for the Open.Theremin version 3.0  Copyright (C) 2010-2016 by Urs Gaudenz
 https://github.com/GaudiLabs/OpenTheremin_V3
@@ -181,4 +181,3 @@ GNU license. This Project inherits this 2016 GNU License.
  Check LICENSE file for more information
 
 All text above must be included in any redistribution
-

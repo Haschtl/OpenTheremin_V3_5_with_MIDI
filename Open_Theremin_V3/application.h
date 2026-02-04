@@ -1,9 +1,8 @@
 #ifndef _APPLICATION_H
 #define _APPLICATION_H
 
-#include <avr/io.h>
-
 #include "build.h"
+#include "pins.h"
 
 enum AppState {CALIBRATING = 0, PLAYING};
 enum AppMode  {MUTE = 0, NORMAL};
@@ -21,9 +20,9 @@ class Application {
     static const uint32_t TRIM_PITCH_FACTOR = 33554432;
     static const uint32_t FREQ_FACTOR = 1600000000;
 
-    static const int16_t BUTTON_PIN = 6;
-    static const int16_t LED_PIN_1  = 18;
-    static const int16_t LED_PIN_2  = 19;
+    static const int16_t BUTTON_PIN = OT_BUTTON_PIN;
+    static const int16_t LED_PIN_1  = OT_LED1_PIN;
+    static const int16_t LED_PIN_2  = OT_LED2_PIN;
     
 
     static const int16_t PITCH_POT = 0;

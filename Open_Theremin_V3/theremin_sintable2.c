@@ -1,6 +1,6 @@
 /* Theremin WAVE Table "Phoenix" - 1024 entries full table, amplitude -2048..2048*/
 
-#include <avr/pgmspace.h>
+#include "pgmspace_compat.h"
 
 const int16_t sine_table2[1024] PROGMEM = {\
 0,

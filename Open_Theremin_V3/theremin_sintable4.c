@@ -1,6 +1,6 @@
 /* Theremin WAVE Table "Sinus" - 1024 entries full table, amplitude -2048.,*/
 
-#include <avr/pgmspace.h>
+#include "pgmspace_compat.h"
 
 const int16_t sine_table4[1024] PROGMEM = {\
 
