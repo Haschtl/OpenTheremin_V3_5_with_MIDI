@@ -34,7 +34,11 @@ const int16_t* const wavetables[] = {
   sine_table5,
   sine_table6,
   sine_table7,
-  sine_table8
+  sine_table8,
+  sine_table9,
+  sine_table10,
+  sine_table11,
+  sine_table12
 };
 
 volatile uint16_t vScaledVolume = 0;
@@ -220,7 +224,9 @@ static inline void runWaveTick() {
 #if CV_ENABLED
   #error "CV_ENABLED is not supported on UNO R4 backend"
 #else
-  const uint16_t targetMorphQ8 = ((uint16_t)(vWavetableSelector & 0x07U)) << 8;
+  const uint8_t tableMax = (uint8_t)(OT_WAVETABLE_COUNT - 1U);
+  const uint8_t targetTable = (vWavetableSelector > tableMax) ? tableMax : vWavetableSelector;
+  const uint16_t targetMorphQ8 = ((uint16_t)targetTable) << 8;
   if (waveMorphEnabled) {
     const uint16_t morphStepQ8 = (waveMorphStepQ8 == 0) ? 1U : (uint16_t)waveMorphStepQ8;
     if (wavetableMorphQ8 < targetMorphQ8) {
@@ -236,7 +242,7 @@ static inline void runWaveTick() {
 
   const uint8_t tableA = (uint8_t)(wavetableMorphQ8 >> 8);
   const uint8_t tableBlend = (uint8_t)(wavetableMorphQ8 & 0xFFU);
-  const uint8_t tableB = (tableA < 7U) ? (tableA + 1U) : 7U;
+  const uint8_t tableB = (tableA < tableMax) ? (tableA + 1U) : tableMax;
 
   int32_t waveSample = readInterpolatedSample(wavetables[tableA], offset, frac);
   if (tableBlend > 0U) {
@@ -416,7 +422,11 @@ void ihInitialiseTimer() {
 void ihInitialiseInterrupts() {
   reenableInt1 = true;
   int1Enabled = true;
-  wavetableMorphQ8 = ((uint16_t)(vWavetableSelector & 0x07U)) << 8;
+  {
+    const uint8_t tableMax = (uint8_t)(OT_WAVETABLE_COUNT - 1U);
+    const uint8_t startTable = (vWavetableSelector > tableMax) ? tableMax : vWavetableSelector;
+    wavetableMorphQ8 = ((uint16_t)startTable) << 8;
+  }
   biquadZ1 = 0;
   biquadZ2 = 0;
   rebuildBiquadTable();

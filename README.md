@@ -63,7 +63,7 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - CC `23`: Pitch Bend enable (`>=64` on).
 - CC `24`: Pitch Bend range (mapped to `1,2,4,5,7,12,24,48`).
 - CC `25`: Volume trigger (`0..127`).
-- CC `26`: Wavetable select (`0..7` mapped from CC range).
+- CC `26`: Wavetable select (`0..11` mapped from CC range).
 - CC `27`: Audio tick preset (`31.25k / 40k / 48k`).
 - CC `28`: Wavetable morph on/off (`>=64` on).
 - CC `29`: Pitch tilt filter on/off (`>=64` on).
@@ -75,6 +75,8 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - Calibration remote combo: CC `102` value `42`, then within 2s CC `103` value `99`.
 
 When selecting a timbre preset (MIDI Program Change or waveform preset via pot), audio feature defaults are restored.
+
+Additional timbres were added: Triangle-Vocal, Soft-Saw, Clarinet, and Cello.
 
 Note: native USB-MIDI depends on UNO R4 core support (`CFG_TUD_MIDI=1` + MIDI interface descriptor availability).
 

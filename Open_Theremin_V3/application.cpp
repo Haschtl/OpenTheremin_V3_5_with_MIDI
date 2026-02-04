@@ -6,6 +6,7 @@
 #include "SPImcpDAC.h"
 #include "ihandlers.h"
 #include "timer.h"
+#include "wavetables.h"
 #include <EEPROM.h>
 
 #if OT_MIDI_NATIVE_USB && defined(OT_MIDI_BACKEND_TINYUSB_RAW)
@@ -827,7 +828,7 @@ void Application::midi_apply_preset(uint8_t preset)
 
   const MidiPreset &cfg = kMidiPresets[preset];
   registerValue = cfg.transpose;
-  vWavetableSelector = cfg.wavetable & 0x07;
+  vWavetableSelector = min((uint8_t)(OT_WAVETABLE_COUNT - 1U), cfg.wavetable);
   midi_bend_range = cfg.bendRange;
   midi_volume_trigger = cfg.volumeTrigger;
   flag_legato_on = cfg.legatoOn ? 1 : 0;
@@ -868,7 +869,11 @@ void Application::midi_handle_cc(uint8_t control, uint8_t value)
       midi_volume_trigger = value;
       break;
     case OT_CC_WAVETABLE:
-      vWavetableSelector = min((uint8_t)7, (uint8_t)(value >> 4));
+      {
+        uint16_t idx = ((uint16_t)value * (uint16_t)OT_WAVETABLE_COUNT) >> 7;
+        if (idx >= OT_WAVETABLE_COUNT) idx = OT_WAVETABLE_COUNT - 1U;
+        vWavetableSelector = (uint8_t)idx;
+      }
       break;
     case OT_CC_AUDIO_RATE_PRESET:
       setAudioRatePreset((uint8_t)min((uint8_t)2, (uint8_t)(value / 43)));
@@ -1295,8 +1300,11 @@ void Application::set_parameters ()
       
     case 1:
       // Waveform
-      data_steps = data_pot_value >> 7;
-      vWavetableSelector = data_steps;
+      data_steps = (uint16_t)(((uint32_t)data_pot_value * (uint32_t)OT_WAVETABLE_COUNT) >> 10);
+      if (data_steps >= OT_WAVETABLE_COUNT) {
+        data_steps = OT_WAVETABLE_COUNT - 1U;
+      }
+      vWavetableSelector = (uint8_t)data_steps;
       resetAudioFeatureDefaults();
       break;
       
