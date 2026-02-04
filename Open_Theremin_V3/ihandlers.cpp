@@ -84,7 +84,13 @@ static inline void runWaveTick() {
 #else
   const int16_t waveSample = wavetables[vWavetableSelector][offset];
   const uint32_t scaledSample = ((int32_t)waveSample * (uint32_t)vScaledVolume) >> 16;
+#if OT_USE_DMA
+  interrupts();
+#endif
   SPImcpDACsendPrepared(SPImcpDACformatA(scaledSample + MCP_DAC_BASE));
+#if OT_USE_DMA
+  noInterrupts();
+#endif
   pointer += vPointerIncrement;
 #endif
 

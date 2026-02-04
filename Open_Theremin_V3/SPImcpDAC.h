@@ -4,10 +4,15 @@
 #define SPImcpDac_h
 
 #include <Arduino.h>
+#include "build.h"
+
+#if OT_USE_DMA
+#include "spimcpdac_backend.h"
+#else
 #include <SPI.h>
+#endif
 
 #include "pins.h"
-#include "build.h"
 
 #ifndef digitalWriteFast
 #define digitalWriteFast digitalWrite
@@ -22,13 +27,25 @@ static inline void SPImcpDACinit()
   pinMode(OT_DAC2_CS_PIN, OUTPUT);
   digitalWriteFast(OT_DAC2_CS_PIN, HIGH);
 
+#if OT_USE_DMA
+  if (!otSpiDmaInit(OT_SPI_CLOCK_HZ)) {
+    for (;;) { }
+  }
+#else
   SPI.begin();
   SPI.beginTransaction(SPISettings(OT_SPI_CLOCK_HZ, MSBFIRST, SPI_MODE0));
+#endif
 }
 
 static inline void SPImcpDACtransmit(uint16_t data)
 {
+#if OT_USE_DMA
+  if (!otSpiDmaTransfer16(data)) {
+    for (;;) { }
+  }
+#else
   SPI.transfer16(data);
+#endif
 }
 
 static inline uint16_t SPImcpDACformatA(uint16_t data)

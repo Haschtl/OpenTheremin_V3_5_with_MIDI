@@ -11,6 +11,9 @@
 // DAC SPI clock (MCP49xx max is typically 20MHz, keep board/wiring quality in mind).
 #define OT_SPI_CLOCK_HZ 20000000
 
+// Optional SPI DMA backend (UNO R4 FSP SPI + DTC path).
+#define OT_USE_DMA 0
+
 // Audio ISR tick rate in Hz (31.25kHz keeps legacy behavior).
 // Original: 31250
 #define OT_AUDIO_TICK_HZ 48000 
