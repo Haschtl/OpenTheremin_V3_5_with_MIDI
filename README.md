@@ -49,9 +49,9 @@ This githup repository provides the code to add a MIDI interface to the Open The
 3. Select the correct arduino board from Tools -> Board (`Arduino UNO R4 Minima` or `Arduino UNO R4 WiFi`).
 4. Select the correct USB port on Tools -> Serial Port.
 5. Upload the code by clicking on the upload button.
-6. MIDI output is USB-MIDI (class compliant), no serial-MIDI/HIDUINO configuration is needed.
+6. MIDI transport is USB serial (MIDI byte stream at 115200 baud), use a USB-serial MIDI bridge/router on host side.
 
-### MIDI-IN controls (USB MIDI)
+### MIDI-IN controls (USB serial MIDI stream)
 The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - Program Change `0..7`: recall one of 8 live presets.
 - CC `20`: Mute toggle (`>=64` mute, `<64` normal).
@@ -171,7 +171,7 @@ Effectively, according to the sequence described above (Fade-in / Picth Variatio
 If you want to play in a given scale you need to set Legato Mode = ON, Pitch Bend Mode = OFF, Pitch Bend Range = 1 and to use a synth with a "force to scale" capacity. Then select the expected scale and play. Out of scale notes will be replaced by the closest one in the scale. 
 
 ### What is the problem if MIDI messages appear to be messy and inconsistent resulting in strange note played, strange synth parameter changes, ... ?
-Most probable cause is USB-MIDI host/routing configuration, wrong selected device port, or a synth-side MIDI channel/range mismatch.
+Most probable cause is host-side USB-serial MIDI routing configuration, wrong selected device port, or a synth-side MIDI channel/range mismatch.
 
 ### Tweakable parameters (in application.cpp):
 Changing this to your taste may require some test and trial. 

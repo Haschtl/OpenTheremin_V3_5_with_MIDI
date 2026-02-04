@@ -7,11 +7,6 @@
 #include "ihandlers.h"
 #include "timer.h"
 #include <EEPROM.h>
-#if __has_include(<MIDIUSB.h>)
-#include <MIDIUSB.h>
-#else
-#error "MIDIUSB library is required for USB-MIDI output on UNO R4."
-#endif
 
 const AppMode AppModeValues[] = {MUTE,NORMAL};
 const int16_t PitchCalibrationTolerance = 15;
@@ -159,20 +154,10 @@ static inline uint16_t readPotLegacy(uint8_t pin) {
 
 static volatile uint32_t pitch_measure_edges = 0;
 static volatile uint32_t volume_measure_edges = 0;
-static bool midi_pending_flush = false;
-
-static uint8_t usbCinForStatus(uint8_t status) {
-  switch (status & 0xF0) {
-    case 0x80: return 0x08; // Note Off
-    case 0x90: return 0x09; // Note On
-    case 0xA0: return 0x0A; // Poly Aftertouch
-    case 0xB0: return 0x0B; // Control Change
-    case 0xC0: return 0x0C; // Program Change
-    case 0xD0: return 0x0D; // Channel Aftertouch
-    case 0xE0: return 0x0E; // Pitch Bend
-    default:   return 0x00; // Reserved / SysEx
-  }
-}
+static uint8_t midi_in_running_status = 0;
+static uint8_t midi_in_data1 = 0;
+static uint8_t midi_in_expected = 0;
+static bool midi_in_has_data1 = false;
 
 static void onPitchMeasureEdge() {
   pitch_measure_edges++;
@@ -183,10 +168,7 @@ static void onVolumeMeasureEdge() {
 }
 
 static unsigned long countEdgesForMs(uint8_t pin, void (*isr)(), volatile uint32_t *edgeCounter, uint16_t gateMs) {
-  const int irq = digitalPinToInterrupt(pin);
-  if (irq == NOT_AN_INTERRUPT) {
-    return 0;
-  }
+  const pin_size_t irq = digitalPinToInterrupt(pin);
 
   noInterrupts();
   *edgeCounter = 0;
@@ -701,7 +683,8 @@ void Application::delay_NOP(unsigned long time) {
 
 void Application::midi_setup() 
 {
-  // USB MIDI does not need UART setup.
+  // USB CDC transport for MIDI byte stream.
+  Serial.begin(115200);
   _midistate = MIDI_SILENT; 
 }
 
@@ -709,18 +692,14 @@ void Application::midi_setup()
 void Application::midi_msg_send(uint8_t channel, uint8_t midi_cmd1, uint8_t midi_cmd2, uint8_t midi_value) 
 {
   const uint8_t status = (midi_cmd1 & 0xF0) | (channel & 0x0F);
-  const uint8_t cin = usbCinForStatus(status);
-  const midiEventPacket_t packet = {cin, status, midi_cmd2, midi_value};
-  MidiUSB.sendMIDI(packet);
-  midi_pending_flush = true;
+  Serial.write(status);
+  Serial.write(midi_cmd2);
+  Serial.write(midi_value);
 }
 
 void Application::midi_flush()
 {
-  if (midi_pending_flush) {
-    MidiUSB.flush();
-    midi_pending_flush = false;
-  }
+  // No explicit flush required for Serial transport.
 }
 
 void Application::midi_set_mute(bool muted)
@@ -818,21 +797,43 @@ void Application::midi_input_poll()
     calibrationArmed = false;
   }
 
-  midiEventPacket_t packet = MidiUSB.read();
-  while (packet.header != 0) {
-    const uint8_t status = packet.byte1;
-    const uint8_t type = status & 0xF0;
-    const uint8_t channel = status & 0x0F;
+  while (Serial.available() > 0) {
+    const uint8_t byteIn = (uint8_t) Serial.read();
 
-    if (channel == OT_MIDI_IN_CHANNEL) {
-      if (type == 0xB0) {
-        midi_handle_cc(packet.byte2, packet.byte3);
-      } else if (type == 0xC0) {
-        midi_apply_preset(packet.byte2 & 0x07);
-      }
+    if (byteIn & 0x80) {
+      midi_in_running_status = byteIn;
+      const uint8_t type = midi_in_running_status & 0xF0;
+      midi_in_expected = (type == 0xC0 || type == 0xD0) ? 1 : 2;
+      midi_in_has_data1 = false;
+      continue;
     }
 
-    packet = MidiUSB.read();
+    if (midi_in_running_status == 0 || midi_in_expected == 0) {
+      continue;
+    }
+
+    if (!midi_in_has_data1) {
+      midi_in_data1 = byteIn;
+      midi_in_has_data1 = true;
+
+      if (midi_in_expected == 1) {
+        const uint8_t type = midi_in_running_status & 0xF0;
+        const uint8_t channel = midi_in_running_status & 0x0F;
+        if (channel == OT_MIDI_IN_CHANNEL && type == 0xC0) {
+          midi_apply_preset(midi_in_data1 & 0x07);
+        }
+        midi_in_has_data1 = false;
+      }
+      continue;
+    }
+
+    const uint8_t data2 = byteIn;
+    const uint8_t type = midi_in_running_status & 0xF0;
+    const uint8_t channel = midi_in_running_status & 0x0F;
+    if (channel == OT_MIDI_IN_CHANNEL && type == 0xB0) {
+      midi_handle_cc(midi_in_data1, data2);
+    }
+    midi_in_has_data1 = false;
   }
 }
 

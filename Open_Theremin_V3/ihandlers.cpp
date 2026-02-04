@@ -150,26 +150,17 @@ void ihEnableInt1() {
 }
 
 static void attachCaptureInterrupts() {
-  const int volumeInterrupt = digitalPinToInterrupt(OT_VOLUME_CAPTURE_PIN);
-  const int pitchInterrupt = digitalPinToInterrupt(OT_PITCH_CAPTURE_PIN);
-
-  if (volumeInterrupt != NOT_AN_INTERRUPT) {
-    attachInterrupt(volumeInterrupt, onVolumeCapture, RISING);
-  }
-  if (pitchInterrupt != NOT_AN_INTERRUPT) {
-    attachInterrupt(pitchInterrupt, onPitchCapture, RISING);
-  }
+  const pin_size_t volumeInterrupt = digitalPinToInterrupt(OT_VOLUME_CAPTURE_PIN);
+  const pin_size_t pitchInterrupt = digitalPinToInterrupt(OT_PITCH_CAPTURE_PIN);
+  attachInterrupt(volumeInterrupt, onVolumeCapture, RISING);
+  attachInterrupt(pitchInterrupt, onPitchCapture, RISING);
 }
 
 static void detachCaptureInterrupts() {
-  const int volumeInterrupt = digitalPinToInterrupt(OT_VOLUME_CAPTURE_PIN);
-  const int pitchInterrupt = digitalPinToInterrupt(OT_PITCH_CAPTURE_PIN);
-  if (volumeInterrupt != NOT_AN_INTERRUPT) {
-    detachInterrupt(volumeInterrupt);
-  }
-  if (pitchInterrupt != NOT_AN_INTERRUPT) {
-    detachInterrupt(pitchInterrupt);
-  }
+  const pin_size_t volumeInterrupt = digitalPinToInterrupt(OT_VOLUME_CAPTURE_PIN);
+  const pin_size_t pitchInterrupt = digitalPinToInterrupt(OT_PITCH_CAPTURE_PIN);
+  detachInterrupt(volumeInterrupt);
+  detachInterrupt(pitchInterrupt);
 }
 
 static void startWaveTimer() {
