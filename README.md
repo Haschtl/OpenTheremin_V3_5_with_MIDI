@@ -7,6 +7,7 @@
 - Audio tick rate can also be changed at runtime via `ihSetAudioTickHz(hz)` (range in `build.h`).
 - Simple preset helper is available via `OT_AUDIO_RATE_PRESET` in `Open_Theremin_V3/build.h`.
 - Optional SPI DMA backend can be enabled with `OT_USE_DMA` in `Open_Theremin_V3/build.h`.
+- MIDI-IN control channel is fixed via `OT_MIDI_IN_CHANNEL` in `Open_Theremin_V3/build.h`.
 - Calibration frequency measurements use interrupt edge counting.
 
 
@@ -49,6 +50,19 @@ This githup repository provides the code to add a MIDI interface to the Open The
 4. Select the correct USB port on Tools -> Serial Port.
 5. Upload the code by clicking on the upload button.
 6. MIDI output is USB-MIDI (class compliant), no serial-MIDI/HIDUINO configuration is needed.
+
+### MIDI-IN controls (USB MIDI)
+The following controls are handled on `OT_MIDI_IN_CHANNEL`:
+- Program Change `0..7`: recall one of 8 live presets.
+- CC `20`: Mute toggle (`>=64` mute, `<64` normal).
+- CC `21`: Panic (All Notes Off).
+- CC `22`: Legato (`>=64` on).
+- CC `23`: Pitch Bend enable (`>=64` on).
+- CC `24`: Pitch Bend range (mapped to `1,2,4,5,7,12,24,48`).
+- CC `25`: Volume trigger (`0..127`).
+- CC `26`: Wavetable select (`0..7` mapped from CC range).
+- CC `27`: Audio tick preset (`31.25k / 40k / 48k`).
+- Calibration remote combo: CC `102` value `42`, then within 2s CC `103` value `99`.
 
 ### Added and removed compare to Open Theremin V3. 
 Serial communication implemented for program monitoring purpose was removed (Particularly during calibration).

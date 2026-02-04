@@ -67,6 +67,10 @@ class Application {
     void midi_setup();
     void midi_msg_send(uint8_t channel, uint8_t midi_cmd1, uint8_t midi_cmd2, uint8_t midi_value);
     void midi_flush();
+    void midi_input_poll();
+    void midi_handle_cc(uint8_t control, uint8_t value);
+    void midi_apply_preset(uint8_t preset);
+    void midi_set_mute(bool muted);
     void midi_application ();
     void calculate_note_bend ();
     void init_parameters ();

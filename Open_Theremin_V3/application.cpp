@@ -83,6 +83,48 @@ static const uint16_t OT_MODE_TOGGLE_PRESS_MS = 48;
 static const uint16_t OT_CALIBRATION_PRESS_MS = 480;
 static const uint16_t OT_LED_RESTORE_MS = 2080;
 static const uint16_t OT_MIDI_UPDATE_MS = 3;
+static const uint16_t OT_MIDI_CAL_ARM_TIMEOUT_MS = 2000;
+
+static const uint8_t OT_CC_MUTE_TOGGLE = 20;
+static const uint8_t OT_CC_PANIC = 21;
+static const uint8_t OT_CC_LEGATO = 22;
+static const uint8_t OT_CC_PITCH_BEND_ENABLE = 23;
+static const uint8_t OT_CC_PITCH_BEND_RANGE = 24;
+static const uint8_t OT_CC_VOLUME_TRIGGER = 25;
+static const uint8_t OT_CC_WAVETABLE = 26;
+static const uint8_t OT_CC_AUDIO_RATE_PRESET = 27;
+static const uint8_t OT_CC_CAL_ARM = 102;
+static const uint8_t OT_CC_CAL_CONFIRM = 103;
+
+static const uint8_t OT_CAL_ARM_KEY = 42;
+static const uint8_t OT_CAL_CONFIRM_KEY = 99;
+
+static bool calibrationArmed = false;
+static uint32_t calibrationArmMillis = 0;
+static bool midiCalibrationRequested = false;
+
+struct MidiPreset {
+  uint8_t transpose;
+  uint8_t wavetable;
+  uint8_t bendRange;
+  uint8_t volumeTrigger;
+  uint8_t legatoOn;
+  uint8_t pitchBendOn;
+  uint8_t rodCc;
+  uint8_t rodCcLo;
+  uint8_t loopCc;
+};
+
+static const MidiPreset kMidiPresets[8] = {
+  {2, 0, 2, 0,   1, 1, 255, 255, 7},
+  {2, 1, 4, 8,   1, 1, 74,  255, 11},
+  {2, 2, 12, 16, 1, 1, 16,  48,  7},
+  {2, 3, 24, 20, 1, 1, 17,  49,  74},
+  {1, 4, 7, 24,  1, 0, 18,  255, 1},
+  {3, 5, 5, 28,  0, 1, 10,  255, 93},
+  {2, 6, 48, 32, 1, 1, 19,  255, 71},
+  {2, 7, 1, 0,   0, 0, 255, 255, 95},
+};
 
 static bool setAudioRatePreset(uint8_t preset) {
   switch (preset) {
@@ -264,6 +306,7 @@ void Application::loop() {
   volumePotValue   = readPotLegacy(VOLUME_POT);
   
   set_parameters ();
+  midi_input_poll();
   midi_flush();
   
   if (_state == PLAYING && HW_BUTTON_PRESSED) 
@@ -273,7 +316,7 @@ void Application::loop() {
     resetTimer();
   }
 
-  if (_state == CALIBRATING && HW_BUTTON_RELEASED) 
+  if (_state == CALIBRATING && HW_BUTTON_RELEASED && !midiCalibrationRequested) 
   {
     if (timerExpiredMillis(OT_MODE_TOGGLE_PRESS_MS)) 
     {
@@ -294,7 +337,7 @@ void Application::loop() {
     _state = PLAYING;
   };
 
-  if (_state == CALIBRATING && timerExpiredMillis(OT_CALIBRATION_PRESS_MS)) 
+  if (_state == CALIBRATING && (midiCalibrationRequested || timerExpiredMillis(OT_CALIBRATION_PRESS_MS))) 
   {
     HW_LED1_OFF; HW_LED2_ON;
   
@@ -319,6 +362,7 @@ void Application::loop() {
       ; // NOP
     
     _state = PLAYING;
+    midiCalibrationRequested = false;
     _midistate = MIDI_SILENT;
   };
 
@@ -676,6 +720,119 @@ void Application::midi_flush()
   if (midi_pending_flush) {
     MidiUSB.flush();
     midi_pending_flush = false;
+  }
+}
+
+void Application::midi_set_mute(bool muted)
+{
+  if (muted) {
+    _mode = MUTE;
+    _midistate = MIDI_STOP;
+    midi_msg_send(midi_channel, 0xB0, 0x7B, 0x00);
+    HW_LED1_OFF;
+    HW_LED2_ON;
+  } else {
+    _mode = NORMAL;
+    _midistate = MIDI_SILENT;
+    HW_LED1_ON;
+    HW_LED2_OFF;
+  }
+}
+
+void Application::midi_apply_preset(uint8_t preset)
+{
+  if (preset >= 8) {
+    return;
+  }
+
+  const MidiPreset &cfg = kMidiPresets[preset];
+  registerValue = cfg.transpose;
+  vWavetableSelector = cfg.wavetable & 0x07;
+  midi_bend_range = cfg.bendRange;
+  midi_volume_trigger = cfg.volumeTrigger;
+  flag_legato_on = cfg.legatoOn ? 1 : 0;
+  flag_pitch_bend_on = cfg.pitchBendOn ? 1 : 0;
+  rod_midi_cc = cfg.rodCc;
+  rod_midi_cc_lo = cfg.rodCcLo;
+  loop_midi_cc = cfg.loopCc;
+
+  resetTimer();
+  HW_LED1_TOGGLE;
+  HW_LED2_TOGGLE;
+}
+
+void Application::midi_handle_cc(uint8_t control, uint8_t value)
+{
+  switch (control) {
+    case OT_CC_MUTE_TOGGLE:
+      midi_set_mute(value >= 64);
+      break;
+    case OT_CC_PANIC:
+      midi_msg_send(midi_channel, 0xB0, 0x7B, 0x00);
+      _midistate = MIDI_SILENT;
+      break;
+    case OT_CC_LEGATO:
+      flag_legato_on = (value >= 64) ? 1 : 0;
+      break;
+    case OT_CC_PITCH_BEND_ENABLE:
+      flag_pitch_bend_on = (value >= 64) ? 1 : 0;
+      break;
+    case OT_CC_PITCH_BEND_RANGE: {
+      static const uint8_t ranges[] = {1, 2, 4, 5, 7, 12, 24, 48};
+      const uint8_t idx = min((uint8_t)7, (uint8_t)(value >> 4));
+      midi_bend_range = ranges[idx];
+      break;
+    }
+    case OT_CC_VOLUME_TRIGGER:
+      midi_volume_trigger = value;
+      break;
+    case OT_CC_WAVETABLE:
+      vWavetableSelector = min((uint8_t)7, (uint8_t)(value >> 4));
+      break;
+    case OT_CC_AUDIO_RATE_PRESET:
+      setAudioRatePreset((uint8_t)min((uint8_t)2, (uint8_t)(value / 43)));
+      break;
+    case OT_CC_CAL_ARM:
+      if (value == OT_CAL_ARM_KEY) {
+        calibrationArmed = true;
+        calibrationArmMillis = millis();
+      }
+      break;
+    case OT_CC_CAL_CONFIRM:
+      if (calibrationArmed && value == OT_CAL_CONFIRM_KEY &&
+          (millis() - calibrationArmMillis) <= OT_MIDI_CAL_ARM_TIMEOUT_MS) {
+        midiCalibrationRequested = true;
+        _state = CALIBRATING;
+        resetTimer();
+      }
+      calibrationArmed = false;
+      break;
+    default:
+      break;
+  }
+}
+
+void Application::midi_input_poll()
+{
+  if (calibrationArmed && (millis() - calibrationArmMillis) > OT_MIDI_CAL_ARM_TIMEOUT_MS) {
+    calibrationArmed = false;
+  }
+
+  midiEventPacket_t packet = MidiUSB.read();
+  while (packet.header != 0) {
+    const uint8_t status = packet.byte1;
+    const uint8_t type = status & 0xF0;
+    const uint8_t channel = status & 0x0F;
+
+    if (channel == OT_MIDI_IN_CHANNEL) {
+      if (type == 0xB0) {
+        midi_handle_cc(packet.byte2, packet.byte3);
+      } else if (type == 0xC0) {
+        midi_apply_preset(packet.byte2 & 0x07);
+      }
+    }
+
+    packet = MidiUSB.read();
   }
 }
 

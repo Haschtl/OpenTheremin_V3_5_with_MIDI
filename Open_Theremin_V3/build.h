@@ -27,4 +27,7 @@
 // Median filtering for analog pots (odd number, currently supported: 3).
 #define OT_POT_MEDIAN_SAMPLES 3
 
+// MIDI IN control channel (0..15 => MIDI channels 1..16).
+#define OT_MIDI_IN_CHANNEL 0
+
 #endif // _BUILD_H
