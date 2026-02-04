@@ -7,6 +7,11 @@
 #include "ihandlers.h"
 #include "timer.h"
 #include <EEPROM.h>
+#if __has_include(<MIDIUSB.h>)
+#include <MIDIUSB.h>
+#else
+#error "MIDIUSB library is required for USB-MIDI output on UNO R4."
+#endif
 
 const AppMode AppModeValues[] = {MUTE,NORMAL};
 const int16_t PitchCalibrationTolerance = 15;
@@ -82,6 +87,20 @@ static inline uint16_t readPotLegacy(uint8_t pin) {
 
 static volatile uint32_t pitch_measure_edges = 0;
 static volatile uint32_t volume_measure_edges = 0;
+static bool midi_pending_flush = false;
+
+static uint8_t usbCinForStatus(uint8_t status) {
+  switch (status & 0xF0) {
+    case 0x80: return 0x08; // Note Off
+    case 0x90: return 0x09; // Note On
+    case 0xA0: return 0x0A; // Poly Aftertouch
+    case 0xB0: return 0x0B; // Control Change
+    case 0xC0: return 0x0C; // Program Change
+    case 0xD0: return 0x0D; // Channel Aftertouch
+    case 0xE0: return 0x0E; // Pitch Bend
+    default:   return 0x00; // Reserved / SysEx
+  }
+}
 
 static void onPitchMeasureEdge() {
   pitch_measure_edges++;
@@ -212,6 +231,7 @@ void Application::loop() {
   volumePotValue   = readPotLegacy(VOLUME_POT);
   
   set_parameters ();
+  midi_flush();
   
   if (_state == PLAYING && HW_BUTTON_PRESSED) 
   {
@@ -604,23 +624,26 @@ void Application::delay_NOP(unsigned long time) {
 
 void Application::midi_setup() 
 {
-  // Set MIDI baud rate:
-  Serial.begin(115200); // Baudrate for midi to serial. Use a serial to midi router https://github.com/projectgus/hairless-midiserial
-  //Serial.begin(31250); // Baudrate for real midi. Use din connection https://www.arduino.cc/en/Tutorial/Midi or HIDUINO https://github.com/ddiakopoulos/hiduino
-
+  // USB MIDI does not need UART setup.
   _midistate = MIDI_SILENT; 
 }
 
 
 void Application::midi_msg_send(uint8_t channel, uint8_t midi_cmd1, uint8_t midi_cmd2, uint8_t midi_value) 
 {
-  uint8_t mixed_cmd1_channel; 
+  const uint8_t status = (midi_cmd1 & 0xF0) | (channel & 0x0F);
+  const uint8_t cin = usbCinForStatus(status);
+  const midiEventPacket_t packet = {cin, status, midi_cmd2, midi_value};
+  MidiUSB.sendMIDI(packet);
+  midi_pending_flush = true;
+}
 
-  mixed_cmd1_channel = (midi_cmd1 & 0xF0)| (channel & 0x0F);
-  
-  Serial.write(mixed_cmd1_channel);
-  Serial.write(midi_cmd2);
-  Serial.write(midi_value);
+void Application::midi_flush()
+{
+  if (midi_pending_flush) {
+    MidiUSB.flush();
+    midi_pending_flush = false;
+  }
 }
 
 // midi_application sends note and volume and uses pitch bend to simulate continuous picth. 

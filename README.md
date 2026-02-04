@@ -41,17 +41,10 @@ This githup repository provides the code to add a MIDI interface to the Open The
 ### Installation
 1. Open up the Arduino IDE
 2. Open the File "Open_Theremin_V3.ino"
-3. Important Step !  In "Application.cpp", take care of selecting MIDI mode that correponds to your cituation (put "//" in front off inadequate line - MIDI through serial is selected by default here):
-
-   Serial.begin(115200); // Baudrate for midi to serial. Use a serial to midi router https://github.com/projectgus/hairless-midiserial
-  
-   //Serial.begin(31250); // Baudrate for real midi. Use din connection https://www.arduino.cc/en/Tutorial/Midi or HIDUINO https://github.com/ddiakopoulos/hiduino
-
-   I tested "Hiduino" and "MIDI to serial" modes, both are OK.
-   
-4. Selecting the correct usb port on Tools -> Serial Port
-5. Select the correct arduino board from Tools -> Board
-6. Upload the code by clicking on the upload button.
+3. Select the correct arduino board from Tools -> Board (`Arduino UNO R4 Minima` or `Arduino UNO R4 WiFi`).
+4. Select the correct USB port on Tools -> Serial Port.
+5. Upload the code by clicking on the upload button.
+6. MIDI output is USB-MIDI (class compliant), no serial-MIDI/HIDUINO configuration is needed.
 
 ### Added and removed compare to Open Theremin V3. 
 Serial communication implemented for program monitoring purpose was removed (Particularly during calibration).
@@ -160,7 +153,7 @@ Effectively, according to the sequence described above (Fade-in / Picth Variatio
 If you want to play in a given scale you need to set Legato Mode = ON, Pitch Bend Mode = OFF, Pitch Bend Range = 1 and to use a synth with a "force to scale" capacity. Then select the expected scale and play. Out of scale notes will be replaced by the closest one in the scale. 
 
 ### What is the problem if MIDI messages appear to be messy and inconsistent resulting in strange note played, strange synth parameter changes, ... ?
-Most probable cause is that incorrect Baudrate was selected (see "Installation" step 3 )
+Most probable cause is USB-MIDI host/routing configuration, wrong selected device port, or a synth-side MIDI channel/range mismatch.
 
 ### Tweakable parameters (in application.cpp):
 Changing this to your taste may require some test and trial. 
