@@ -7,6 +7,7 @@
 #include <SPI.h>
 
 #include "pins.h"
+#include "build.h"
 
 #ifndef digitalWriteFast
 #define digitalWriteFast digitalWrite
@@ -22,7 +23,7 @@ static inline void SPImcpDACinit()
   digitalWriteFast(OT_DAC2_CS_PIN, HIGH);
 
   SPI.begin();
-  SPI.beginTransaction(SPISettings(12000000, MSBFIRST, SPI_MODE0));
+  SPI.beginTransaction(SPISettings(OT_SPI_CLOCK_HZ, MSBFIRST, SPI_MODE0));
 }
 
 static inline void SPImcpDACtransmit(uint16_t data)

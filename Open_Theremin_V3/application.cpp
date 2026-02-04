@@ -80,8 +80,25 @@ static const uint8_t OT_ADC_READ_BITS = 14;
 static const uint8_t OT_ADC_LEGACY_BITS = 10;
 static const uint8_t OT_ADC_DOWNSHIFT = OT_ADC_READ_BITS - OT_ADC_LEGACY_BITS;
 
+static inline uint16_t median3U16(uint16_t a, uint16_t b, uint16_t c) {
+  if (a > b) { const uint16_t t = a; a = b; b = t; }
+  if (b > c) { const uint16_t t = b; b = c; c = t; }
+  if (a > b) { const uint16_t t = a; a = b; b = t; }
+  return b;
+}
+
 static inline uint16_t readPotLegacy(uint8_t pin) {
-  const uint16_t raw = analogRead(pin);
+  uint16_t raw;
+#if OT_POT_MEDIAN_SAMPLES == 3
+  const uint16_t r0 = analogRead(pin);
+  const uint16_t r1 = analogRead(pin);
+  const uint16_t r2 = analogRead(pin);
+  raw = median3U16(r0, r1, r2);
+#elif OT_POT_MEDIAN_SAMPLES == 1
+  raw = analogRead(pin);
+#else
+  #error "Unsupported OT_POT_MEDIAN_SAMPLES. Use 1 or 3."
+#endif
   return (OT_ADC_DOWNSHIFT > 0) ? (raw >> OT_ADC_DOWNSHIFT) : raw;
 }
 

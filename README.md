@@ -2,7 +2,7 @@
 
 ### UNO R4 only
 - This repository now targets `Arduino UNO R4` only.
-- Audio tick generation uses UNO R4 timer resources (`FspTimer`) when available.
+- Audio tick generation requires UNO R4 hardware timer resources (`FspTimer`).
 - Calibration frequency measurements use interrupt edge counting.
 
 

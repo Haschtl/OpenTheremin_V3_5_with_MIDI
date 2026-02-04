@@ -9,17 +9,16 @@
 #include "build.h"
 
 #if __has_include(<FspTimer.h>)
-#include <FspTimer.h>
-#define OT_HAS_FSP_TIMER 1
+  #include <FspTimer.h>
 #else
-#define OT_HAS_FSP_TIMER 0
+  #error "FspTimer.h is required. This firmware only supports the UNO R4 hardware-timer path."
 #endif
 
-#if OT_HAS_FSP_TIMER && __has_include(<r_timer_api.h>)
-#include <r_timer_api.h>
-#define OT_TIMER_CB_HAS_ARGS 1
+#if __has_include(<r_timer_api.h>)
+  #include <r_timer_api.h>
+  #define OT_TIMER_CB_HAS_ARGS 1
 #else
-#define OT_TIMER_CB_HAS_ARGS 0
+  #define OT_TIMER_CB_HAS_ARGS 0
 #endif
 
 static const uint32_t MCP_DAC_BASE = 2048;
@@ -61,12 +60,10 @@ static volatile uint8_t debounce_v = 0;
 static volatile bool int1Enabled = false;
 static volatile uint16_t pitch_capture_counter_i = 0;
 
-#if OT_HAS_FSP_TIMER
 static FspTimer waveTimer;
 static bool waveTimerStarted = false;
 static uint8_t waveTimerType = GPT_TIMER;
 static int8_t waveTimerChannel = -1;
-#endif
 
 static inline uint16_t readTimerCounter16() {
   // 1MHz monotonic source converted to ~16MHz virtual ticks for legacy math.
@@ -170,7 +167,6 @@ static void detachCaptureInterrupts() {
 }
 
 static void startWaveTimer() {
-#if OT_HAS_FSP_TIMER
   if (waveTimerStarted) {
     return;
   }
@@ -179,23 +175,19 @@ static void startWaveTimer() {
     waveTimerChannel = FspTimer::get_available_timer(waveTimerType);
   }
 
-  if (waveTimerChannel >= 0) {
-    waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, OT_AUDIO_TICK_HZ, 0.0f, onWaveTimerTick);
-    waveTimer.setup_overflow_irq();
-    waveTimer.open();
-    waveTimer.start();
-    waveTimerStarted = true;
+  if (waveTimerChannel < 0) {
+    // Hard fail by design: no fallback timer source allowed.
+    for (;;) { }
   }
-#else
-  const int waveInterrupt = digitalPinToInterrupt(OT_WAVE_TICK_PIN);
-  if (waveInterrupt != NOT_AN_INTERRUPT) {
-    attachInterrupt(waveInterrupt, onWaveTimerTick, RISING);
-  }
-#endif
+
+  waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, OT_AUDIO_TICK_HZ, 0.0f, onWaveTimerTick);
+  waveTimer.setup_overflow_irq();
+  waveTimer.open();
+  waveTimer.start();
+  waveTimerStarted = true;
 }
 
 static void stopWaveTimer() {
-#if OT_HAS_FSP_TIMER
   if (!waveTimerStarted) {
     return;
   }
@@ -203,12 +195,6 @@ static void stopWaveTimer() {
   waveTimer.stop();
   waveTimer.close();
   waveTimerStarted = false;
-#else
-  const int waveInterrupt = digitalPinToInterrupt(OT_WAVE_TICK_PIN);
-  if (waveInterrupt != NOT_AN_INTERRUPT) {
-    detachInterrupt(waveInterrupt);
-  }
-#endif
 }
 
 void ihInitialiseTimer() {

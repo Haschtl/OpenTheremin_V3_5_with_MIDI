@@ -13,7 +13,6 @@ static const uint8_t OT_LED1_PIN = 18;  // A4
 static const uint8_t OT_LED2_PIN = 19;  // A5
 
 static const uint8_t OT_VOLUME_CAPTURE_PIN = 2;
-static const uint8_t OT_WAVE_TICK_PIN = 3;       // 31.25kHz external tick
 static const uint8_t OT_PITCH_CAPTURE_PIN = 8;
 
 static const uint8_t OT_DAC_LDAC_PIN = 7;
