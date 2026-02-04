@@ -55,6 +55,14 @@ volatile uint8_t vWavetableSelector = 0;
 static volatile uint16_t pointer = 0;
 static volatile uint8_t debounce_p = 0;
 static volatile uint8_t debounce_v = 0;
+static volatile uint16_t wavetableMorphQ8 = 0;
+static volatile int32_t toneFilterState = 0;
+static volatile bool waveMorphEnabled = (OT_WAVEMORPH_ENABLE_DEFAULT != 0);
+static volatile bool toneTiltEnabled = (OT_TILT_ENABLE_DEFAULT != 0);
+static volatile bool softClipEnabled = (OT_SOFTCLIP_ENABLE_DEFAULT != 0);
+static volatile uint8_t waveMorphStepQ8 = (OT_WAVEMORPH_STEP_Q8 == 0) ? 1 : OT_WAVEMORPH_STEP_Q8;
+static volatile uint8_t toneTiltWetMax = (OT_TILT_WET_MAX > 255) ? 255 : OT_TILT_WET_MAX;
+static volatile uint8_t softClipCubicShift = OT_SOFTCLIP_CUBIC_SHIFT;
 
 static volatile bool int1Enabled = false;
 static volatile uint16_t pitch_capture_counter_i = 0;
@@ -70,6 +78,34 @@ static inline uint16_t readTimerCounter16() {
   return (uint16_t)((micros() * 16UL) & 0xFFFF);
 }
 
+static inline int16_t readInterpolatedSample(const int16_t *table, uint16_t index, uint8_t frac) {
+  const uint16_t nextIndex = (index + 1U) & 0x3FFU;
+  const int32_t a = table[index];
+  const int32_t b = table[nextIndex];
+  return (int16_t)(a + (((b - a) * (int32_t)frac) >> 6));
+}
+
+static inline int16_t softClip12Bit(int32_t x) {
+  if (x > 2047) {
+    x = 2047;
+  } else if (x < -2048) {
+    x = -2048;
+  }
+
+  int32_t y = x;
+  if (softClipEnabled) {
+    const int64_t cubic = (int64_t)x * (int64_t)x * (int64_t)x;
+    y = x - (int32_t)(cubic >> softClipCubicShift);  // gentle cubic soft clip
+  }
+
+  if (y > 2047) {
+    y = 2047;
+  } else if (y < -2048) {
+    y = -2048;
+  }
+  return (int16_t)y;
+}
+
 static inline void runWaveTick() {
   if (!int1Enabled) {
     return;
@@ -77,17 +113,76 @@ static inline void runWaveTick() {
 
   SPImcpDAClatch();
 
-  const uint16_t offset = (uint16_t)(pointer >> 6) & 0x3ff;
+  const uint16_t offset = (uint16_t)(pointer >> 6) & 0x3FFU;
+  const uint8_t frac = (uint8_t)(pointer & 0x3FU);
 
 #if CV_ENABLED
   #error "CV_ENABLED is not supported on UNO R4 backend"
 #else
-  const int16_t waveSample = wavetables[vWavetableSelector][offset];
-  const uint32_t scaledSample = ((int32_t)waveSample * (uint32_t)vScaledVolume) >> 16;
+  const uint16_t targetMorphQ8 = ((uint16_t)(vWavetableSelector & 0x07U)) << 8;
+  if (waveMorphEnabled) {
+    const uint16_t morphStepQ8 = (waveMorphStepQ8 == 0) ? 1U : (uint16_t)waveMorphStepQ8;
+    if (wavetableMorphQ8 < targetMorphQ8) {
+      const uint16_t delta = targetMorphQ8 - wavetableMorphQ8;
+      wavetableMorphQ8 += (delta > morphStepQ8) ? morphStepQ8 : delta;
+    } else if (wavetableMorphQ8 > targetMorphQ8) {
+      const uint16_t delta = wavetableMorphQ8 - targetMorphQ8;
+      wavetableMorphQ8 -= (delta > morphStepQ8) ? morphStepQ8 : delta;
+    }
+  } else {
+    wavetableMorphQ8 = targetMorphQ8;
+  }
+
+  const uint8_t tableA = (uint8_t)(wavetableMorphQ8 >> 8);
+  const uint8_t tableBlend = (uint8_t)(wavetableMorphQ8 & 0xFFU);
+  const uint8_t tableB = (tableA < 7U) ? (tableA + 1U) : 7U;
+
+  int32_t waveSample = readInterpolatedSample(wavetables[tableA], offset, frac);
+  if (tableBlend > 0U) {
+    const int32_t waveSampleB = readInterpolatedSample(wavetables[tableB], offset, frac);
+    waveSample += ((waveSampleB - waveSample) * (int32_t)tableBlend) >> 8;
+  }
+
+  const int16_t pointerIncrementSigned = (int16_t)vPointerIncrement;
+  const uint16_t absIncrement = (pointerIncrementSigned < 0)
+                                  ? (uint16_t)(-pointerIncrementSigned)
+                                  : (uint16_t)pointerIncrementSigned;
+
+  if (toneTiltEnabled) {
+    // Darken very high notes a bit to get closer to classic theremin timbre.
+    uint8_t filterShift = 2;
+    if (absIncrement > 3072U) {
+      filterShift = 5;
+    } else if (absIncrement > 1536U) {
+      filterShift = 4;
+    } else if (absIncrement > 768U) {
+      filterShift = 3;
+    }
+    toneFilterState += (waveSample - toneFilterState) >> filterShift;
+
+    uint8_t wet = 0;
+    if (absIncrement > OT_TILT_START_INCREMENT) {
+      const uint16_t wetRaw = (uint16_t)((absIncrement - OT_TILT_START_INCREMENT) >> 3);
+      const uint16_t wetMax = (uint16_t)toneTiltWetMax;
+      wet = (wetRaw > wetMax) ? (uint8_t)wetMax : (uint8_t)wetRaw;
+    }
+    waveSample += ((toneFilterState - waveSample) * (int32_t)wet) >> 8;
+  } else {
+    toneFilterState = waveSample;
+  }
+
+  int32_t scaledSample = (waveSample * (int32_t)vScaledVolume) >> 16;
+  scaledSample = softClip12Bit(scaledSample);
+  int32_t dacValue = scaledSample + (int32_t)MCP_DAC_BASE;
+  if (dacValue < 0) {
+    dacValue = 0;
+  } else if (dacValue > 4095) {
+    dacValue = 4095;
+  }
 #if OT_USE_DMA
   interrupts();
 #endif
-  SPImcpDACsendPrepared(SPImcpDACformatA(scaledSample + MCP_DAC_BASE));
+  SPImcpDACsendPrepared(SPImcpDACformatA((uint16_t)dacValue));
 #if OT_USE_DMA
   noInterrupts();
 #endif
@@ -201,6 +296,8 @@ void ihInitialiseTimer() {
 void ihInitialiseInterrupts() {
   reenableInt1 = true;
   int1Enabled = true;
+  wavetableMorphQ8 = ((uint16_t)(vWavetableSelector & 0x07U)) << 8;
+  toneFilterState = 0;
   attachCaptureInterrupts();
   startWaveTimer();
 }
@@ -241,4 +338,69 @@ bool ihSetAudioTickHz(uint32_t hz) {
   }
 
   return true;
+}
+
+void ihSetWaveMorphEnabled(bool enabled) {
+  noInterrupts();
+  waveMorphEnabled = enabled;
+  interrupts();
+}
+
+void ihSetToneTiltEnabled(bool enabled) {
+  noInterrupts();
+  toneTiltEnabled = enabled;
+  interrupts();
+}
+
+void ihSetSoftClipEnabled(bool enabled) {
+  noInterrupts();
+  softClipEnabled = enabled;
+  interrupts();
+}
+
+void ihSetWaveMorphStepQ8(uint8_t stepQ8) {
+  noInterrupts();
+  waveMorphStepQ8 = (stepQ8 == 0) ? 1 : stepQ8;
+  interrupts();
+}
+
+void ihSetToneTiltWetMax(uint8_t wetMax) {
+  noInterrupts();
+  toneTiltWetMax = wetMax;
+  interrupts();
+}
+
+void ihSetSoftClipCubicShift(uint8_t cubicShift) {
+  if (cubicShift < 20) {
+    cubicShift = 20;
+  } else if (cubicShift > 30) {
+    cubicShift = 30;
+  }
+  noInterrupts();
+  softClipCubicShift = cubicShift;
+  interrupts();
+}
+
+bool ihGetWaveMorphEnabled() {
+  return waveMorphEnabled;
+}
+
+bool ihGetToneTiltEnabled() {
+  return toneTiltEnabled;
+}
+
+bool ihGetSoftClipEnabled() {
+  return softClipEnabled;
+}
+
+uint8_t ihGetWaveMorphStepQ8() {
+  return waveMorphStepQ8;
+}
+
+uint8_t ihGetToneTiltWetMax() {
+  return toneTiltWetMax;
+}
+
+uint8_t ihGetSoftClipCubicShift() {
+  return softClipCubicShift;
 }

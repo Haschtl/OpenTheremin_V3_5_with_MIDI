@@ -27,6 +27,20 @@
 // Median filtering for analog pots (odd number, currently supported: 3).
 #define OT_POT_MEDIAN_SAMPLES 3
 
+// Audio timbre shaping controls.
+// Morph speed between adjacent wavetables in Q8 domain per audio tick (1 = slow/smooth).
+#define OT_WAVEMORPH_STEP_Q8 1
+// Runtime-togglable defaults for advanced audio shaping features.
+#define OT_WAVEMORPH_ENABLE_DEFAULT 1
+#define OT_TILT_ENABLE_DEFAULT 1
+#define OT_SOFTCLIP_ENABLE_DEFAULT 1
+// Start pitch-dependent darkening when absolute phase increment exceeds this value.
+#define OT_TILT_START_INCREMENT 512
+// Max wet amount (0..255) for pitch-dependent darkening blend.
+#define OT_TILT_WET_MAX 160
+// Soft-clip enable and drive (lower shift => stronger saturation).
+#define OT_SOFTCLIP_CUBIC_SHIFT 24
+
 // MIDI IN control channel (0..15 => MIDI channels 1..16).
 #define OT_MIDI_IN_CHANNEL 0
 

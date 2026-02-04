@@ -65,7 +65,15 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - CC `25`: Volume trigger (`0..127`).
 - CC `26`: Wavetable select (`0..7` mapped from CC range).
 - CC `27`: Audio tick preset (`31.25k / 40k / 48k`).
+- CC `28`: Wavetable morph on/off (`>=64` on).
+- CC `29`: Pitch tilt filter on/off (`>=64` on).
+- CC `30`: Soft clip on/off (`>=64` on).
+- CC `31`: Wavetable morph speed (`1..16` internal range).
+- CC `32`: Pitch tilt amount (`0..255` internal wet max).
+- CC `33`: Soft clip drive (higher CC = stronger drive).
 - Calibration remote combo: CC `102` value `42`, then within 2s CC `103` value `99`.
+
+When selecting a timbre preset (MIDI Program Change or waveform preset via pot), audio feature defaults are restored.
 
 Note: native USB-MIDI depends on UNO R4 core support (`CFG_TUD_MIDI=1` + MIDI interface descriptor availability).
 

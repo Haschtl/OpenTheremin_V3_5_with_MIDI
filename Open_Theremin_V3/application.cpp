@@ -105,6 +105,12 @@ static const uint8_t OT_CC_PITCH_BEND_RANGE = 24;
 static const uint8_t OT_CC_VOLUME_TRIGGER = 25;
 static const uint8_t OT_CC_WAVETABLE = 26;
 static const uint8_t OT_CC_AUDIO_RATE_PRESET = 27;
+static const uint8_t OT_CC_WAVEMORPH_ENABLE = 28;
+static const uint8_t OT_CC_TONETILT_ENABLE = 29;
+static const uint8_t OT_CC_SOFTCLIP_ENABLE = 30;
+static const uint8_t OT_CC_WAVEMORPH_SPEED = 31;
+static const uint8_t OT_CC_TONETILT_AMOUNT = 32;
+static const uint8_t OT_CC_SOFTCLIP_DRIVE = 33;
 static const uint8_t OT_CC_CAL_ARM = 102;
 static const uint8_t OT_CC_CAL_CONFIRM = 103;
 
@@ -145,6 +151,15 @@ static bool setAudioRatePreset(uint8_t preset) {
     case 2: return ihSetAudioTickHz(48000U);
     default: return ihSetAudioTickHz((uint32_t)OT_AUDIO_TICK_HZ);
   }
+}
+
+static void resetAudioFeatureDefaults() {
+  ihSetWaveMorphEnabled(OT_WAVEMORPH_ENABLE_DEFAULT != 0);
+  ihSetToneTiltEnabled(OT_TILT_ENABLE_DEFAULT != 0);
+  ihSetSoftClipEnabled(OT_SOFTCLIP_ENABLE_DEFAULT != 0);
+  ihSetWaveMorphStepQ8((OT_WAVEMORPH_STEP_Q8 == 0) ? 1 : OT_WAVEMORPH_STEP_Q8);
+  ihSetToneTiltWetMax((OT_TILT_WET_MAX > 255) ? 255 : OT_TILT_WET_MAX);
+  ihSetSoftClipCubicShift(OT_SOFTCLIP_CUBIC_SHIFT);
 }
 
 static inline uint16_t median3U16(uint16_t a, uint16_t b, uint16_t c) {
@@ -309,7 +324,8 @@ initialiseInterrupts();
   EEPROM.get(4,pitchCalibrationBase);
   EEPROM.get(8,volCalibrationBase);
  
- init_parameters();
+  init_parameters();
+ resetAudioFeatureDefaults();
  midi_setup();
   
 }
@@ -817,6 +833,7 @@ void Application::midi_apply_preset(uint8_t preset)
   rod_midi_cc = cfg.rodCc;
   rod_midi_cc_lo = cfg.rodCcLo;
   loop_midi_cc = cfg.loopCc;
+  resetAudioFeatureDefaults();
 
   resetTimer();
   HW_LED1_TOGGLE;
@@ -854,6 +871,29 @@ void Application::midi_handle_cc(uint8_t control, uint8_t value)
     case OT_CC_AUDIO_RATE_PRESET:
       setAudioRatePreset((uint8_t)min((uint8_t)2, (uint8_t)(value / 43)));
       break;
+    case OT_CC_WAVEMORPH_ENABLE:
+      ihSetWaveMorphEnabled(value >= 64);
+      break;
+    case OT_CC_TONETILT_ENABLE:
+      ihSetToneTiltEnabled(value >= 64);
+      break;
+    case OT_CC_SOFTCLIP_ENABLE:
+      ihSetSoftClipEnabled(value >= 64);
+      break;
+    case OT_CC_WAVEMORPH_SPEED: {
+      const uint8_t step = 1U + (uint8_t)(value >> 3);  // 1..16
+      ihSetWaveMorphStepQ8(step);
+      break;
+    }
+    case OT_CC_TONETILT_AMOUNT:
+      ihSetToneTiltWetMax((uint8_t)min((uint16_t)255U, (uint16_t)value * 2U));
+      break;
+    case OT_CC_SOFTCLIP_DRIVE: {
+      // Higher CC = stronger clip (smaller cubic shift).
+      const uint8_t shift = (uint8_t)(30U - ((uint16_t)value * 10U) / 127U); // 30..20
+      ihSetSoftClipCubicShift(shift);
+      break;
+    }
     case OT_CC_CAL_ARM:
       if (value == OT_CAL_ARM_KEY) {
         calibrationArmed = true;
@@ -1252,6 +1292,7 @@ void Application::set_parameters ()
       // Waveform
       data_steps = data_pot_value >> 7;
       vWavetableSelector = data_steps;
+      resetAudioFeatureDefaults();
       break;
       
     case 2:
