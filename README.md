@@ -74,9 +74,24 @@ The following controls are handled on `OT_MIDI_IN_CHANNEL`:
 - CC `34`: Subtle vibrato+jitter on/off (`>=64` on).
 - Calibration remote combo: CC `102` value `42`, then within 2s CC `103` value `99`.
 
+Wavetable MIDI reference (for CC `26` / Timbre pot):
+- `0` Classic Sine (`sine_table`)
+- `1` Warm Sine A (`sine_table6`)
+- `2` Warm Sine B (`sine_table5`)
+- `3` Cello (`sine_table12`)
+- `4` Triangle-Vocal (`sine_table9`)
+- `5` Sinus Variant A (`sine_table3`)
+- `6` Sinus Variant B (`sine_table4`)
+- `7` Clarinet-like (`sine_table11`)
+- `8` Bright Sinus A (`sine_table8`)
+- `9` Bright Sinus B (`sine_table7`)
+- `10` Soft-Saw (`sine_table10`)
+- `11` Phoenix / Brightest (`sine_table2`)
+
 When selecting a timbre preset (MIDI Program Change or waveform preset via pot), audio feature defaults are restored.
 
 Additional timbres were added: Triangle-Vocal, Soft-Saw, Clarinet, and Cello.
+Wavetable order is arranged roughly from warm/dark to bright/edgy across indices `0..11`.
 
 Note: native USB-MIDI depends on UNO R4 core support (`CFG_TUD_MIDI=1` + MIDI interface descriptor availability).
 

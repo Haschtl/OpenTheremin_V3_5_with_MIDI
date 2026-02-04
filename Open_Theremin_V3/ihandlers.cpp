@@ -27,18 +27,19 @@ static const uint8_t BIQUAD_COEF_SHIFT = 14;
 static const uint8_t BIQUAD_TABLE_SIZE = 32;
 
 const int16_t* const wavetables[] = {
+  // Ordered roughly from warm/dark to bright/edgy.
   sine_table,
-  sine_table2,
+  sine_table6,
+  sine_table5,
+  sine_table12,  // Cello
+  sine_table9,   // Triangle-Vocal
   sine_table3,
   sine_table4,
-  sine_table5,
-  sine_table6,
-  sine_table7,
+  sine_table11,  // Clarinet-like
   sine_table8,
-  sine_table9,
+  sine_table7,
   sine_table10,
-  sine_table11,
-  sine_table12
+  sine_table2    // Phoenix (brightest)
 };
 
 volatile uint16_t vScaledVolume = 0;
