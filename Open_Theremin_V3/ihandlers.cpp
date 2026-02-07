@@ -439,9 +439,9 @@ static void detachCaptureInterrupts() {
   detachInterrupt(pitchInterrupt);
 }
 
-static void startWaveTimer() {
+static bool startWaveTimer() {
   if (waveTimerStarted) {
-    return;
+    return true;
   }
 
   if (waveTimerChannel < 0) {
@@ -458,7 +458,8 @@ static void startWaveTimer() {
   if (waveTimerChannel < 0) {
     // No timer resource available.
     OT_DEBUG_PRINTLN_F("[DBG] timer: no channel available");
-    fatalErrorLoop(OT_ERR_TIMER);
+    setErrorIndicator(OT_ERR_TIMER);
+    return false;
   }
 
   OT_DEBUG_PRINT("[DBG] timer: type=");
@@ -471,29 +472,41 @@ static void startWaveTimer() {
   OT_DEBUG_PRINTLN_F("[DBG] timer: begin");
   if (!waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, (float)currentAudioTickHz, 0.0f, onWaveTimerTick)) {
     OT_DEBUG_PRINTLN_F("[DBG] timer: begin failed");
-    fatalErrorLoop(OT_ERR_TIMER);
+    setErrorIndicator(OT_ERR_TIMER);
+    waveTimerChannel = -1;
+    return false;
   }
 
   OT_DEBUG_PRINTLN_F("[DBG] timer: setup irq");
   if (!waveTimer.setup_overflow_irq()) {
     OT_DEBUG_PRINTLN_F("[DBG] timer: setup irq failed");
-    fatalErrorLoop(OT_ERR_TIMER);
+    setErrorIndicator(OT_ERR_TIMER);
+    waveTimerChannel = -1;
+    return false;
   }
 
   OT_DEBUG_PRINTLN_F("[DBG] timer: open");
   if (!waveTimer.open()) {
     OT_DEBUG_PRINTLN_F("[DBG] timer: open failed");
-    fatalErrorLoop(OT_ERR_TIMER);
+    setErrorIndicator(OT_ERR_TIMER);
+    waveTimerChannel = -1;
+    return false;
   }
 
   OT_DEBUG_PRINTLN_F("[DBG] timer: start");
   if (!waveTimer.start()) {
     OT_DEBUG_PRINTLN_F("[DBG] timer: start failed");
-    fatalErrorLoop(OT_ERR_TIMER);
+    setErrorIndicator(OT_ERR_TIMER);
+    waveTimerChannel = -1;
+    return false;
   }
 
   waveTimerStarted = true;
+  if (getErrorIndicator() == OT_ERR_TIMER) {
+    clearErrorIndicator();
+  }
   OT_DEBUG_PRINTLN_F("[DBG] timer: started");
+  return true;
 }
 
 static void stopWaveTimer() {
@@ -504,6 +517,8 @@ static void stopWaveTimer() {
   waveTimer.stop();
   waveTimer.close();
   waveTimerStarted = false;
+  waveTimerChannel = -1;
+  waveTimerType = (OT_TIMER_PREFER_AGT != 0) ? AGT_TIMER : GPT_TIMER;
 }
 
 void ihInitialiseTimer() {
@@ -524,7 +539,7 @@ void ihInitialiseInterrupts() {
   updateVibratoRate();
   vibratoPhaseQ32 = 0;
   attachCaptureInterrupts();
-  startWaveTimer();
+  (void)startWaveTimer();
 }
 
 void ihInitialisePitchMeasurement() {
@@ -546,6 +561,9 @@ bool ihSetAudioTickHz(uint32_t hz) {
   if (hz < OT_AUDIO_TICK_HZ_MIN || hz > OT_AUDIO_TICK_HZ_MAX) {
     return false;
   }
+  if (hz == currentAudioTickHz) {
+    return true;
+  }
 
   const bool restart = waveTimerStarted;
   if (restart) {
@@ -561,10 +579,28 @@ bool ihSetAudioTickHz(uint32_t hz) {
   updateVibratoRate();
 
   if (restart) {
-    startWaveTimer();
+    if (!startWaveTimer()) {
+      return false;
+    }
   }
 
   return true;
+}
+
+void ihRecoverTimer() {
+  static uint32_t lastAttemptMs = 0;
+  if (waveTimerStarted || !reenableInt1) {
+    return;
+  }
+
+  const uint32_t now = millis();
+  if ((uint32_t)(now - lastAttemptMs) < 200U) {
+    return;
+  }
+  lastAttemptMs = now;
+
+  OT_DEBUG_PRINTLN_F("[DBG] timer: recover attempt");
+  (void)startWaveTimer();
 }
 
 void ihSetWaveMorphEnabled(bool enabled) {

@@ -37,6 +37,7 @@ void ihInitialiseTimer();
 void ihInitialiseInterrupts();
 void ihInitialisePitchMeasurement();
 void ihInitialiseVolumeMeasurement();
+void ihRecoverTimer();
 uint32_t ihGetAudioTickHz();
 bool ihSetAudioTickHz(uint32_t hz);
 void ihSetWaveMorphEnabled(bool enabled);

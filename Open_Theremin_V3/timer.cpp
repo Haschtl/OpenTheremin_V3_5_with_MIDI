@@ -19,12 +19,19 @@ uint16_t ticksToMillis(uint32_t ticks) {
 
 void ticktimer (uint32_t ticks) {
   resetTimer();
-  while (timerUnexpired(ticks))
-    ;  // NOP
+  const uint32_t startMs = millis();
+  const uint32_t timeoutMs = (uint32_t)ticksToMillis(ticks) + 50U;
+  while (timerUnexpired(ticks)) {
+    if ((uint32_t)(millis() - startMs) > timeoutMs) {
+      break;
+    }
+  }
 };
 
 void millitimer (uint16_t milliseconds) {
-  ticktimer(millisToTicks(milliseconds));
+  // In practice this is used for audible feedback delays.
+  // Using wall-clock delay avoids hangs if the audio tick ISR stalls.
+  delay(milliseconds);
 }
 
 

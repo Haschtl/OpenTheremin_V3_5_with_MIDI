@@ -126,6 +126,7 @@ static bool calibrationArmed = false;
 static uint32_t calibrationArmMillis = 0;
 static bool midiCalibrationRequested = false;
 static const int OT_EEPROM_ADDR_MIDI_CHANNEL = 12;
+static uint8_t activeTonePreset = 0xFF;
 
 struct TonePreset {
   uint8_t wavetable;
@@ -161,12 +162,17 @@ static const TonePreset kTonePresets[] = {
 };
 
 static bool setAudioRatePreset(uint8_t preset) {
+  uint32_t targetHz;
   switch (preset) {
-    case 0: return ihSetAudioTickHz(31250U);
-    case 1: return ihSetAudioTickHz(40000U);
-    case 2: return ihSetAudioTickHz(48000U);
-    default: return ihSetAudioTickHz((uint32_t)OT_AUDIO_TICK_HZ);
+    case 0: targetHz = 31250U; break;
+    case 1: targetHz = 40000U; break;
+    case 2: targetHz = 48000U; break;
+    default: targetHz = (uint32_t)OT_AUDIO_TICK_HZ; break;
   }
+  if (ihGetAudioTickHz() == targetHz) {
+    return true;
+  }
+  return ihSetAudioTickHz(targetHz);
 }
 
 static void resetAudioFeatureDefaults() {
@@ -200,6 +206,9 @@ static void applyTonePreset(uint8_t preset) {
   if (preset >= count) {
     return;
   }
+  if (activeTonePreset == preset) {
+    return;
+  }
 
   const TonePreset &cfg = kTonePresets[preset];
   vWavetableSelector = min((uint8_t)(OT_WAVETABLE_COUNT - 1U), cfg.wavetable);
@@ -217,6 +226,7 @@ static void applyTonePreset(uint8_t preset) {
   ihSetSoftClipEnabled(cfg.softClipOn != 0);
   ihSetSoftClipCubicShift(cfg.softClipShift);
   ihSetVibratoJitterEnabled(cfg.vibratoOn != 0);
+  activeTonePreset = preset;
 
   resetTimer();
   HW_LED1_TOGGLE;
@@ -262,7 +272,11 @@ static inline void midiTransportBegin() {
 #if OT_HAS_NATIVE_USB_MIDI
   // USB stack is started by core init.
 #else
+  #if OT_DEBUG_ENABLED
+  OT_DEBUG_PRINTLN_F("[DBG] midi transport disabled in DEBUG build");
+  #else
   Serial.begin(OT_MIDI_SERIAL_BAUD);
+  #endif
 #endif
 }
 
@@ -273,9 +287,15 @@ static inline void midiTransportWrite3(uint8_t status, uint8_t data1, uint8_t da
     (void)tud_midi_stream_write(0, msg, sizeof(msg));
   }
 #else
+  #if OT_DEBUG_ENABLED
+  (void)status;
+  (void)data1;
+  (void)data2;
+  #else
   Serial.write(status);
   Serial.write(data1);
   Serial.write(data2);
+  #endif
 #endif
 }
 
@@ -307,11 +327,16 @@ static inline bool midiTransportReadByte(uint8_t *out) {
     midi_usb_payload_pos = 0;
   }
 #else
+  #if OT_DEBUG_ENABLED
+  (void)out;
+  return false;
+  #else
   if (Serial.available() <= 0) {
     return false;
   }
   *out = (uint8_t)Serial.read();
   return true;
+  #endif
 #endif
 }
 
@@ -345,6 +370,16 @@ static unsigned long countEdgesForMs(uint8_t pin, void (*isr)(), volatile uint32
   interrupts();
 
   return (edges * 1000UL) / gateMs;
+}
+
+static bool waitForFlagOrTimeout(volatile bool *flag, uint16_t timeoutMs) {
+  const uint32_t t0 = millis();
+  while (!(*flag)) {
+    if ((uint32_t)(millis() - t0) >= (uint32_t)timeoutMs) {
+      return false;
+    }
+  }
+  return true;
 }
 
 
@@ -453,6 +488,8 @@ AppMode Application::nextMode() {
 void Application::loop() {
   int32_t pitch_v = 0, pitch_l = 0;            // Last value of pitch  (for filtering)
   int32_t vol_v = 0,   vol_l = 0;              // Last value of volume (for filtering)
+  static bool calButtonLatch = false;
+#if OT_DEBUG_ENABLED && OT_DEBUG_RUNTIME_LOGS
   static uint32_t dbgLastAliveMs = 0;
   static uint32_t dbgLastAntennaMs = 0;
   static bool dbgButtonInit = false;
@@ -466,13 +503,14 @@ void Application::loop() {
   static int32_t dbgPitchFiltered = 0;
   static uint16_t dbgVolRaw = 0;
   static int32_t dbgVolFiltered = 0;
+#endif
 
   uint16_t volumePotValue = 0;
   uint16_t pitchPotValue = 0;
 
   mloop:                   // Main loop avoiding the GCC "optimization"
 
-#if OT_DEBUG_ENABLED
+#if OT_DEBUG_ENABLED && OT_DEBUG_RUNTIME_LOGS
   {
     const uint32_t now = millis();
     if ((uint32_t)(now - dbgLastAliveMs) >= 1000U) {
@@ -495,10 +533,11 @@ void Application::loop() {
   
   set_parameters ();
   serviceErrorIndicator();
+  ihRecoverTimer();
   midi_input_poll();
   midi_flush();
 
-#if OT_DEBUG_ENABLED
+#if OT_DEBUG_ENABLED && OT_DEBUG_RUNTIME_LOGS
   {
     const uint32_t now = millis();
     const bool buttonPressed = HW_BUTTON_PRESSED;
@@ -563,10 +602,16 @@ void Application::loop() {
   }
 #endif
   
-  if (_state == PLAYING && HW_BUTTON_PRESSED) 
+  const bool buttonPressedNow = HW_BUTTON_PRESSED;
+  if (!buttonPressedNow) {
+    calButtonLatch = false;
+  }
+
+  if (_state == PLAYING && buttonPressedNow && !calButtonLatch) 
   {
     _state = CALIBRATING;
-
+    calButtonLatch = true;
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: arm");
     resetTimer();
   }
 
@@ -593,31 +638,51 @@ void Application::loop() {
 
   if (_state == CALIBRATING && (midiCalibrationRequested || timerExpiredMillis(OT_CALIBRATION_PRESS_MS))) 
   {
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: start");
     HW_LED1_OFF; HW_LED2_ON;
   
       
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: startup sound");
     playStartupSound();
-
+	
     // calibrate heterodyne parameters
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: calibrate pitch");
     calibrate_pitch();
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: calibrate volume");
     calibrate_volume();
 
 
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: reinit timer/interrupts");
     initialiseTimer();
     initialiseInterrupts();
    
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: countdown sound");
     playCalibratingCountdownSound();
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: baseline capture");
     calibrate();
   
     _mode=NORMAL;
     HW_LED1_ON;HW_LED2_OFF;
-      
-    while (HW_BUTTON_PRESSED)
-      ; // NOP
-    
+
     _state = PLAYING;
     midiCalibrationRequested = false;
     _midistate = MIDI_SILENT;
+
+    // Never block forever if button signal is stuck low.
+    if (HW_BUTTON_PRESSED) {
+      const uint32_t releaseWaitStart = millis();
+      while (HW_BUTTON_PRESSED && (uint32_t)(millis() - releaseWaitStart) < 1500U) {
+        delay(1);
+      }
+      if (HW_BUTTON_PRESSED) {
+        OT_DEBUG_PRINTLN_F("[DBG] calibration: button still pressed (timeout)");
+      } else {
+        OT_DEBUG_PRINTLN_F("[DBG] calibration: button released");
+      }
+    }
+
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: done");
+    _state = PLAYING;
   };
 
 #if CV_ENABLED
@@ -628,11 +693,15 @@ void Application::loop() {
 
   if (pitchValueAvailable) {                        // If capture event
 
+#if OT_DEBUG_ENABLED && OT_DEBUG_RUNTIME_LOGS
     dbgPitchRaw = pitch;
+#endif
     pitch_v=pitch;                         // Averaging pitch values
     pitch_v=pitch_l+((pitch_v-pitch_l)>>2);
     pitch_l=pitch_v;
+#if OT_DEBUG_ENABLED && OT_DEBUG_RUNTIME_LOGS
     dbgPitchFiltered = pitch_v;
+#endif
 
 
 //HW_LED2_ON;
@@ -651,12 +720,16 @@ void Application::loop() {
 
   if (volumeValueAvailable) {
     vol = max(vol, 5000);
+#if OT_DEBUG_ENABLED && OT_DEBUG_RUNTIME_LOGS
     dbgVolRaw = vol;
+#endif
 
     vol_v=vol;                  // Averaging volume values
     vol_v=vol_l+((vol_v-vol_l)>>2);
     vol_l=vol_v;
+#if OT_DEBUG_ENABLED && OT_DEBUG_RUNTIME_LOGS
     dbgVolFiltered = vol_v;
+#endif
 
     switch (_mode) {
       case MUTE:  vol_v = 0;                                                      break;
@@ -690,22 +763,37 @@ void Application::calibrate()
   resetPitchFlag();
   resetTimer();
   savePitchCounter();
-  while (!pitchValueAvailable && timerUnexpiredMillis(10))
-    ; // NOP
+  if (!waitForFlagOrTimeout(&pitchValueAvailable, 20U)) {
+    OT_DEBUG_PRINTLN_F("[DBG] calibrate: pitch flag timeout");
+  }
   pitchCalibrationBase = pitch;
+  if (pitchCalibrationBase <= 0) {
+    pitchCalibrationBase = 1;
+    OT_DEBUG_PRINTLN_F("[DBG] calibrate: pitch base clamped to 1");
+  }
   pitchCalibrationBaseFreq = FREQ_FACTOR/pitchCalibrationBase;
   pitchCalibrationConstant = FREQ_FACTOR/pitchSensitivityConstant/2+200;
 
   resetVolFlag();
   resetTimer();
   saveVolCounter();
-  while (!volumeValueAvailable && timerUnexpiredMillis(10))
-    ; // NOP
+  if (!waitForFlagOrTimeout(&volumeValueAvailable, 20U)) {
+    OT_DEBUG_PRINTLN_F("[DBG] calibrate: volume flag timeout");
+  }
   volCalibrationBase = vol;
   
   
   EEPROM.put(4,pitchCalibrationBase);
   EEPROM.put(8,volCalibrationBase);
+
+  OT_DEBUG_PRINT("[DBG] calibrate result basePitch=");
+  OT_DEBUG_PRINT((long)pitchCalibrationBase);
+  OT_DEBUG_PRINT(" baseVol=");
+  OT_DEBUG_PRINT((long)volCalibrationBase);
+  OT_DEBUG_PRINT(" pitchBaseFreq=");
+  OT_DEBUG_PRINT((long)pitchCalibrationBaseFreq);
+  OT_DEBUG_PRINT(" pitchConst=");
+  OT_DEBUG_PRINTLN((long)pitchCalibrationConstant);
   
 }
 
@@ -777,6 +865,19 @@ l_iteration_pitch ++;
 delay(100);
 
 EEPROM.put(0,pitchXn0);
+
+OT_DEBUG_PRINT("[DBG] calibrate_pitch result eepromPitchDAC=");
+OT_DEBUG_PRINT((int)pitchXn0);
+OT_DEBUG_PRINT(" q0=");
+OT_DEBUG_PRINT((long)q0);
+OT_DEBUG_PRINT(" target=");
+OT_DEBUG_PRINT(pitchfn);
+OT_DEBUG_PRINT(" f0=");
+OT_DEBUG_PRINT(pitchfn0);
+OT_DEBUG_PRINT(" f1=");
+OT_DEBUG_PRINT(pitchfn1);
+OT_DEBUG_PRINT(" iterations=");
+OT_DEBUG_PRINTLN((unsigned int)l_iteration_pitch);
   
 }
 
@@ -845,6 +946,19 @@ l_iteration_volume ++;
 }
 
 EEPROM.put(2,volumeXn0);
+
+OT_DEBUG_PRINT("[DBG] calibrate_volume result eepromVolDAC=");
+OT_DEBUG_PRINT((int)volumeXn0);
+OT_DEBUG_PRINT(" q0=");
+OT_DEBUG_PRINT((long)q0);
+OT_DEBUG_PRINT(" target=");
+OT_DEBUG_PRINT(volumefn);
+OT_DEBUG_PRINT(" f0=");
+OT_DEBUG_PRINT(volumefn0);
+OT_DEBUG_PRINT(" f1=");
+OT_DEBUG_PRINT(volumefn1);
+OT_DEBUG_PRINT(" iterations=");
+OT_DEBUG_PRINTLN((unsigned int)l_iteration_volume);
 
 
 }

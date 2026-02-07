@@ -17,6 +17,10 @@
 #define OT_DEBUG_WAIT_FOR_HOST_MS 2000
 #endif
 
+#ifndef OT_DEBUG_RUNTIME_LOGS
+#define OT_DEBUG_RUNTIME_LOGS 0
+#endif
+
 // Default to USB serial so debug output is visible in PlatformIO monitor.
 #ifndef OT_DEBUG_PORT
 #define OT_DEBUG_PORT Serial
