@@ -8,6 +8,7 @@
 #include "timer.h"
 #include "wavetables.h"
 #include "error_indicator.h"
+#include "debug_log.h"
 #include <EEPROM.h>
 
 #if OT_MIDI_NATIVE_USB && defined(OT_MIDI_BACKEND_TINYUSB_RAW)
@@ -353,6 +354,8 @@ Application::Application()
 };
 
 void Application::setup() {
+  OT_DEBUG_BEGIN();
+  OT_DEBUG_PRINTLN_F("[DBG] setup: start");
 
   clearErrorIndicator();
   HW_LED1_ON;HW_LED2_OFF;
@@ -363,13 +366,17 @@ void Application::setup() {
   pinMode(OT_VOLUME_CAPTURE_PIN, INPUT);
   pinMode(OT_PITCH_CAPTURE_PIN, INPUT);
   analogReadResolution(OT_ADC_READ_BITS);
+  OT_DEBUG_PRINTLN_F("[DBG] setup: pins+adc ready");
 
   digitalWrite(Application::LED_PIN_1, HIGH);    // turn the LED off by making the voltage LOW
 
    SPImcpDACinit();
+  OT_DEBUG_PRINTLN_F("[DBG] setup: spi dac ready");
   if (!setAudioRatePreset(OT_AUDIO_RATE_PRESET)) {
+    OT_DEBUG_PRINTLN_F("[DBG] setup: audio-rate preset failed");
     fatalErrorLoop(OT_ERR_AUDIO_RATE);
   }
+  OT_DEBUG_PRINTLN_F("[DBG] setup: audio-rate preset ok");
 
 EEPROM.get(0,pitchDAC);
 EEPROM.get(2,volumeDAC);
@@ -380,6 +387,7 @@ SPImcpDAC2Bsend(volumeDAC);
   
 initialiseTimer();
 initialiseInterrupts();
+  OT_DEBUG_PRINTLN_F("[DBG] setup: interrupts ready");
 
 
   EEPROM.get(4,pitchCalibrationBase);
@@ -387,8 +395,11 @@ initialiseInterrupts();
  
  init_parameters();
  loadMidiChannelPersistent();
+ OT_DEBUG_PRINT("[DBG] setup: midi channel=");
+ OT_DEBUG_PRINTLN((int)midi_channel);
  resetAudioFeatureDefaults();
  midi_setup();
+ OT_DEBUG_PRINTLN_F("[DBG] setup: done");
   
 }
 
@@ -442,11 +453,42 @@ AppMode Application::nextMode() {
 void Application::loop() {
   int32_t pitch_v = 0, pitch_l = 0;            // Last value of pitch  (for filtering)
   int32_t vol_v = 0,   vol_l = 0;              // Last value of volume (for filtering)
+  static uint32_t dbgLastAliveMs = 0;
+  static uint32_t dbgLastAntennaMs = 0;
+  static bool dbgButtonInit = false;
+  static bool dbgButtonPressedPrev = false;
+  static uint32_t dbgButtonPressStartMs = 0;
+  static uint16_t dbgLastPitchPot = 0xFFFFU;
+  static uint16_t dbgLastVolumePot = 0xFFFFU;
+  static uint16_t dbgLastParamPot = 0xFFFFU;
+  static uint16_t dbgLastDataPot = 0xFFFFU;
+  static uint16_t dbgPitchRaw = 0;
+  static int32_t dbgPitchFiltered = 0;
+  static uint16_t dbgVolRaw = 0;
+  static int32_t dbgVolFiltered = 0;
 
   uint16_t volumePotValue = 0;
   uint16_t pitchPotValue = 0;
 
   mloop:                   // Main loop avoiding the GCC "optimization"
+
+#if OT_DEBUG_ENABLED
+  {
+    const uint32_t now = millis();
+    if ((uint32_t)(now - dbgLastAliveMs) >= 1000U) {
+      dbgLastAliveMs = now;
+      digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+      OT_DEBUG_PRINT("[DBG] alive ms=");
+      OT_DEBUG_PRINT(now);
+      OT_DEBUG_PRINT(" err=");
+      OT_DEBUG_PRINT((int)getErrorIndicator());
+      OT_DEBUG_PRINT(" mode=");
+      OT_DEBUG_PRINT((int)_mode);
+      OT_DEBUG_PRINT(" state=");
+      OT_DEBUG_PRINTLN((int)_state);
+    }
+  }
+#endif
 
   pitchPotValue    = readPotLegacy(PITCH_POT);
   volumePotValue   = readPotLegacy(VOLUME_POT);
@@ -455,6 +497,71 @@ void Application::loop() {
   serviceErrorIndicator();
   midi_input_poll();
   midi_flush();
+
+#if OT_DEBUG_ENABLED
+  {
+    const uint32_t now = millis();
+    const bool buttonPressed = HW_BUTTON_PRESSED;
+    if (!dbgButtonInit) {
+      dbgButtonInit = true;
+      dbgButtonPressedPrev = buttonPressed;
+      dbgButtonPressStartMs = now;
+    }
+    if (buttonPressed != dbgButtonPressedPrev) {
+      if (buttonPressed) {
+        dbgButtonPressStartMs = now;
+        OT_DEBUG_PRINTLN_F("[DBG] button pressed");
+      } else {
+        OT_DEBUG_PRINT("[DBG] button released after ms=");
+        OT_DEBUG_PRINTLN((unsigned long)(now - dbgButtonPressStartMs));
+      }
+      dbgButtonPressedPrev = buttonPressed;
+    }
+
+    bool potsChanged = false;
+    const uint16_t potDeltaThreshold = 4U;
+    if (dbgLastPitchPot == 0xFFFFU || (uint16_t)abs((int)pitchPotValue - (int)dbgLastPitchPot) >= potDeltaThreshold) {
+      dbgLastPitchPot = pitchPotValue;
+      potsChanged = true;
+    }
+    if (dbgLastVolumePot == 0xFFFFU || (uint16_t)abs((int)volumePotValue - (int)dbgLastVolumePot) >= potDeltaThreshold) {
+      dbgLastVolumePot = volumePotValue;
+      potsChanged = true;
+    }
+    if (dbgLastParamPot == 0xFFFFU || (uint16_t)abs((int)param_pot_value - (int)dbgLastParamPot) >= potDeltaThreshold) {
+      dbgLastParamPot = param_pot_value;
+      potsChanged = true;
+    }
+    if (dbgLastDataPot == 0xFFFFU || (uint16_t)abs((int)data_pot_value - (int)dbgLastDataPot) >= potDeltaThreshold) {
+      dbgLastDataPot = data_pot_value;
+      potsChanged = true;
+    }
+    if (potsChanged) {
+      OT_DEBUG_PRINT("[DBG] pots pitch=");
+      OT_DEBUG_PRINT((unsigned int)pitchPotValue);
+      OT_DEBUG_PRINT(" volume=");
+      OT_DEBUG_PRINT((unsigned int)volumePotValue);
+      OT_DEBUG_PRINT(" param=");
+      OT_DEBUG_PRINT((unsigned int)param_pot_value);
+      OT_DEBUG_PRINT(" data=");
+      OT_DEBUG_PRINTLN((unsigned int)data_pot_value);
+    }
+
+    if ((uint32_t)(now - dbgLastAntennaMs) >= 250U) {
+      dbgLastAntennaMs = now;
+      OT_DEBUG_PRINT("[DBG] ant pitchRaw=");
+      OT_DEBUG_PRINT((unsigned int)dbgPitchRaw);
+      OT_DEBUG_PRINT(" pitchFilt=");
+      OT_DEBUG_PRINT((long)dbgPitchFiltered);
+      OT_DEBUG_PRINT(" volRaw=");
+      OT_DEBUG_PRINT((unsigned int)dbgVolRaw);
+      OT_DEBUG_PRINT(" volFilt=");
+      OT_DEBUG_PRINT((long)dbgVolFiltered);
+      OT_DEBUG_PRINT(" scaledVol=");
+      OT_DEBUG_PRINTLN((unsigned int)vScaledVolume);
+    }
+  }
+#endif
   
   if (_state == PLAYING && HW_BUTTON_PRESSED) 
   {
@@ -521,9 +628,11 @@ void Application::loop() {
 
   if (pitchValueAvailable) {                        // If capture event
 
+    dbgPitchRaw = pitch;
     pitch_v=pitch;                         // Averaging pitch values
     pitch_v=pitch_l+((pitch_v-pitch_l)>>2);
     pitch_l=pitch_v;
+    dbgPitchFiltered = pitch_v;
 
 
 //HW_LED2_ON;
@@ -542,10 +651,12 @@ void Application::loop() {
 
   if (volumeValueAvailable) {
     vol = max(vol, 5000);
+    dbgVolRaw = vol;
 
     vol_v=vol;                  // Averaging volume values
     vol_v=vol_l+((vol_v-vol_l)>>2);
     vol_l=vol_v;
+    dbgVolFiltered = vol_v;
 
     switch (_mode) {
       case MUTE:  vol_v = 0;                                                      break;

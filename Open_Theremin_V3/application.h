@@ -25,10 +25,10 @@ class Application {
     static const int16_t LED_PIN_2  = OT_LED2_PIN;
     
 
-    static const int16_t PITCH_POT = 0;
-    static const int16_t VOLUME_POT = 1;
-    static const int16_t WAVE_SELECT_POT = 2;
-    static const int16_t REGISTER_SELECT_POT = 3;
+    static const int16_t PITCH_POT = A0;
+    static const int16_t VOLUME_POT = A1;
+    static const int16_t WAVE_SELECT_POT = A2;
+    static const int16_t REGISTER_SELECT_POT = A3;
 
 
     

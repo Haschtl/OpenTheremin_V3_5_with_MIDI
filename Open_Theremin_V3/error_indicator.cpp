@@ -1,6 +1,7 @@
 #include "error_indicator.h"
 
 #include "hw.h"
+#include "debug_log.h"
 
 static volatile uint8_t g_errorCode = OT_ERR_NONE;
 
@@ -46,11 +47,22 @@ void serviceErrorIndicator() {
 }
 
 [[noreturn]] void fatalErrorLoop(uint8_t code) {
+  OT_DEBUG_BEGIN();
+  OT_DEBUG_PRINT("[DBG] fatalErrorLoop code=");
+  OT_DEBUG_PRINTLN((int)code);
+
   setErrorIndicator(code);
   pinMode(OT_LED1_PIN, OUTPUT);
   pinMode(OT_LED2_PIN, OUTPUT);
+  uint32_t lastDbgMs = 0;
   while (true) {
     serviceErrorIndicator();
+    const uint32_t now = millis();
+    if ((uint32_t)(now - lastDbgMs) >= 1000U) {
+      lastDbgMs = now;
+      OT_DEBUG_PRINT("[DBG] fatal alive code=");
+      OT_DEBUG_PRINTLN((int)code);
+    }
     delay(10);
   }
 }

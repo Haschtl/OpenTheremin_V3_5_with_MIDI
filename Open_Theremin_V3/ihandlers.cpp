@@ -6,6 +6,7 @@
 #include "pins.h"
 #include "wavetables.h"
 #include "error_indicator.h"
+#include "debug_log.h"
 
 #include "build.h"
 #include <math.h>
@@ -93,7 +94,7 @@ static volatile uint16_t pitch_capture_counter_i = 0;
 
 static FspTimer waveTimer;
 static bool waveTimerStarted = false;
-static uint8_t waveTimerType = GPT_TIMER;
+static uint8_t waveTimerType = (OT_TIMER_PREFER_AGT != 0) ? AGT_TIMER : GPT_TIMER;
 static int8_t waveTimerChannel = -1;
 static volatile uint32_t currentAudioTickHz = OT_AUDIO_TICK_HZ;
 
@@ -444,19 +445,55 @@ static void startWaveTimer() {
   }
 
   if (waveTimerChannel < 0) {
-    waveTimerChannel = FspTimer::get_available_timer(waveTimerType);
+    uint8_t selectedType = waveTimerType;
+    int8_t selectedChannel = FspTimer::get_available_timer(selectedType);
+    if (selectedChannel < 0) {
+      selectedType = (waveTimerType == GPT_TIMER) ? AGT_TIMER : GPT_TIMER;
+      selectedChannel = FspTimer::get_available_timer(selectedType);
+    }
+    waveTimerType = selectedType;
+    waveTimerChannel = selectedChannel;
   }
 
   if (waveTimerChannel < 0) {
-    // Hard fail by design: no fallback timer source allowed.
+    // No timer resource available.
+    OT_DEBUG_PRINTLN_F("[DBG] timer: no channel available");
     fatalErrorLoop(OT_ERR_TIMER);
   }
 
-  waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, (float)currentAudioTickHz, 0.0f, onWaveTimerTick);
-  waveTimer.setup_overflow_irq();
-  waveTimer.open();
-  waveTimer.start();
+  OT_DEBUG_PRINT("[DBG] timer: type=");
+  OT_DEBUG_PRINT((waveTimerType == GPT_TIMER) ? "GPT" : "AGT");
+  OT_DEBUG_PRINT(" ch=");
+  OT_DEBUG_PRINT((int)waveTimerChannel);
+  OT_DEBUG_PRINT(" hz=");
+  OT_DEBUG_PRINTLN((unsigned long)currentAudioTickHz);
+
+  OT_DEBUG_PRINTLN_F("[DBG] timer: begin");
+  if (!waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, (float)currentAudioTickHz, 0.0f, onWaveTimerTick)) {
+    OT_DEBUG_PRINTLN_F("[DBG] timer: begin failed");
+    fatalErrorLoop(OT_ERR_TIMER);
+  }
+
+  OT_DEBUG_PRINTLN_F("[DBG] timer: setup irq");
+  if (!waveTimer.setup_overflow_irq()) {
+    OT_DEBUG_PRINTLN_F("[DBG] timer: setup irq failed");
+    fatalErrorLoop(OT_ERR_TIMER);
+  }
+
+  OT_DEBUG_PRINTLN_F("[DBG] timer: open");
+  if (!waveTimer.open()) {
+    OT_DEBUG_PRINTLN_F("[DBG] timer: open failed");
+    fatalErrorLoop(OT_ERR_TIMER);
+  }
+
+  OT_DEBUG_PRINTLN_F("[DBG] timer: start");
+  if (!waveTimer.start()) {
+    OT_DEBUG_PRINTLN_F("[DBG] timer: start failed");
+    fatalErrorLoop(OT_ERR_TIMER);
+  }
+
   waveTimerStarted = true;
+  OT_DEBUG_PRINTLN_F("[DBG] timer: started");
 }
 
 static void stopWaveTimer() {
