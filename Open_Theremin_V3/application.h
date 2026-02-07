@@ -37,9 +37,9 @@ class Application {
     AppMode  _mode;
     AppMidiState _midistate;
         
-    void calibrate();
-    void calibrate_pitch();
-    void calibrate_volume();
+    bool calibrate();
+    bool calibrate_pitch();
+    bool calibrate_volume();
 
 
     AppMode nextMode();
@@ -61,6 +61,8 @@ class Application {
     void hzToAddVal(float hz);
     void playStartupSound();
     void playCalibratingCountdownSound();
+    void playCalibrationSuccessSound();
+    void playCalibrationFailedSound();
     void playModeSettingSound();
     void delay_NOP(unsigned long time);
 

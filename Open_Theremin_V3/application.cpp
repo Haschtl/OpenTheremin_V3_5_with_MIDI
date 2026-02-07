@@ -261,6 +261,8 @@ static uint8_t midi_in_running_status = 0;
 static uint8_t midi_in_data1 = 0;
 static uint8_t midi_in_expected = 0;
 static bool midi_in_has_data1 = false;
+static uint32_t calibrationErrorSetMs = 0;
+static const uint16_t OT_CALIB_ERROR_SHOW_MS = 4000;
 
 #if OT_HAS_NATIVE_USB_MIDI
 static uint8_t midi_usb_payload[3] = {0, 0, 0};
@@ -611,6 +613,11 @@ void Application::loop() {
   {
     _state = CALIBRATING;
     calButtonLatch = true;
+    if (getErrorIndicator() == OT_ERR_CALIB) {
+      clearErrorIndicator();
+      calibrationErrorSetMs = 0;
+      OT_DEBUG_PRINTLN_F("[DBG] calibration: cleared previous CALIB error");
+    }
     OT_DEBUG_PRINTLN_F("[DBG] calibration: arm");
     resetTimer();
   }
@@ -647,9 +654,9 @@ void Application::loop() {
 	
     // calibrate heterodyne parameters
     OT_DEBUG_PRINTLN_F("[DBG] calibration: calibrate pitch");
-    calibrate_pitch();
+    const bool pitchCalOk = calibrate_pitch();
     OT_DEBUG_PRINTLN_F("[DBG] calibration: calibrate volume");
-    calibrate_volume();
+    const bool volumeCalOk = calibrate_volume();
 
 
     OT_DEBUG_PRINTLN_F("[DBG] calibration: reinit timer/interrupts");
@@ -659,10 +666,24 @@ void Application::loop() {
     OT_DEBUG_PRINTLN_F("[DBG] calibration: countdown sound");
     playCalibratingCountdownSound();
     OT_DEBUG_PRINTLN_F("[DBG] calibration: baseline capture");
-    calibrate();
+    const bool baseCalOk = calibrate();
+    const bool calibrationOk = pitchCalOk && volumeCalOk && baseCalOk;
+    OT_DEBUG_PRINT("[DBG] calibration overall=");
+    OT_DEBUG_PRINTLN(calibrationOk ? "OK" : "FAIL");
   
     _mode=NORMAL;
-    HW_LED1_ON;HW_LED2_OFF;
+    if (calibrationOk) {
+      if (getErrorIndicator() == OT_ERR_CALIB) {
+        clearErrorIndicator();
+      }
+      playCalibrationSuccessSound();
+      HW_LED1_ON;HW_LED2_OFF;
+    } else {
+      setErrorIndicator(OT_ERR_CALIB);
+      calibrationErrorSetMs = millis();
+      playCalibrationFailedSound();
+      HW_LED1_OFF;HW_LED2_ON;
+    }
 
     _state = PLAYING;
     midiCalibrationRequested = false;
@@ -682,8 +703,15 @@ void Application::loop() {
     }
 
     OT_DEBUG_PRINTLN_F("[DBG] calibration: done");
-    _state = PLAYING;
   };
+
+  if (calibrationErrorSetMs != 0 &&
+      getErrorIndicator() == OT_ERR_CALIB &&
+      (uint32_t)(millis() - calibrationErrorSetMs) >= OT_CALIB_ERROR_SHOW_MS) {
+    clearErrorIndicator();
+    calibrationErrorSetMs = 0;
+    OT_DEBUG_PRINTLN_F("[DBG] calibration: auto-clear CALIB error");
+  }
 
 #if CV_ENABLED
   #error "CV_ENABLED is not supported on UNO R4 backend"
@@ -758,12 +786,13 @@ void Application::loop() {
   goto mloop;                           // End of main loop
 }
 
-void Application::calibrate()
+bool Application::calibrate()
 {
   resetPitchFlag();
   resetTimer();
   savePitchCounter();
-  if (!waitForFlagOrTimeout(&pitchValueAvailable, 20U)) {
+  const bool pitchOk = waitForFlagOrTimeout(&pitchValueAvailable, 20U);
+  if (!pitchOk) {
     OT_DEBUG_PRINTLN_F("[DBG] calibrate: pitch flag timeout");
   }
   pitchCalibrationBase = pitch;
@@ -777,14 +806,17 @@ void Application::calibrate()
   resetVolFlag();
   resetTimer();
   saveVolCounter();
-  if (!waitForFlagOrTimeout(&volumeValueAvailable, 20U)) {
+  const bool volOk = waitForFlagOrTimeout(&volumeValueAvailable, 20U);
+  if (!volOk) {
     OT_DEBUG_PRINTLN_F("[DBG] calibrate: volume flag timeout");
   }
   volCalibrationBase = vol;
-  
-  
-  EEPROM.put(4,pitchCalibrationBase);
-  EEPROM.put(8,volCalibrationBase);
+
+  const bool baseOk = pitchOk && volOk;
+  if (baseOk) {
+    EEPROM.put(4,pitchCalibrationBase);
+    EEPROM.put(8,volCalibrationBase);
+  }
 
   OT_DEBUG_PRINT("[DBG] calibrate result basePitch=");
   OT_DEBUG_PRINT((long)pitchCalibrationBase);
@@ -794,10 +826,13 @@ void Application::calibrate()
   OT_DEBUG_PRINT((long)pitchCalibrationBaseFreq);
   OT_DEBUG_PRINT(" pitchConst=");
   OT_DEBUG_PRINTLN((long)pitchCalibrationConstant);
-  
+
+  OT_DEBUG_PRINT("[DBG] calibrate base status=");
+  OT_DEBUG_PRINTLN(baseOk ? "OK" : "FAIL");
+  return baseOk;
 }
 
-void Application::calibrate_pitch()
+bool Application::calibrate_pitch()
 {
   
 static int16_t pitchXn0 = 0;
@@ -807,11 +842,14 @@ static float q0 = 0;
 static long pitchfn0 = 0;
 static long pitchfn1 = 0;
 static long pitchfn = 0;
+static long pitchRaw0 = 0;
+static long pitchRaw1 = 0;
 
 
   // limit the number of calibration iteration to 12 
   // the algorythm used is normaly faster than dichotomy which normaly finds a 12Bit number in 12 iterations max
   static uint16_t l_iteration_pitch = 0;
+  const int16_t oldPitchDac = pitchDAC;
   
   InitialisePitchMeasurement();
   interrupts();
@@ -819,7 +857,9 @@ static long pitchfn = 0;
 
   qMeasurement = GetQMeasurement();  // Measure Arudino clock frequency 
 
-q0 = (16000000/qMeasurement*500000);  //Calculated set frequency based on Arudino clock frequency
+// Legacy AVR calibration constants were tuned for a different measurement scale.
+// UNO R4 edge-count measurement is ~32x lower, so scale targets accordingly.
+q0 = (16000000/qMeasurement*(500000L/32L));  // ~15.6k in current measurement units
 
 pitchXn0 = 0;
 pitchXn1 = 4095;
@@ -832,15 +872,24 @@ SPImcpDAC2Bsend(1600);
 
 SPImcpDAC2Asend(pitchXn0);
 delay(100);
-pitchfn0 = GetPitchMeasurement();
+pitchRaw0 = (long)GetPitchMeasurement();
+pitchfn0 = pitchRaw0 - pitchfn;
 
 SPImcpDAC2Asend(pitchXn1);
 delay(100);
-pitchfn1 = GetPitchMeasurement();
+pitchRaw1 = (long)GetPitchMeasurement();
+pitchfn1 = pitchRaw1 - pitchfn;
+
+int16_t bestPitchDac = pitchXn0;
+long bestPitchErrAbs = labs(pitchfn0);
+if (labs(pitchfn1) < bestPitchErrAbs) {
+  bestPitchErrAbs = labs(pitchfn1);
+  bestPitchDac = pitchXn1;
+}
 
  
 l_iteration_pitch = 0;
-while ((abs(pitchfn0 - pitchfn1) > PitchCalibrationTolerance) && (l_iteration_pitch < 12))
+while ((bestPitchErrAbs > PitchCalibrationTolerance) && (l_iteration_pitch < 12))
 {      
       
 SPImcpDAC2Asend(pitchXn0);
@@ -849,9 +898,25 @@ pitchfn0 = GetPitchMeasurement()-pitchfn;
 
 SPImcpDAC2Asend(pitchXn1);
 delay(100);
-pitchfn1 = GetPitchMeasurement()-pitchfn;
+pitchfn1 = (long)GetPitchMeasurement()-pitchfn;
 
+if (labs(pitchfn0) < bestPitchErrAbs) {
+  bestPitchErrAbs = labs(pitchfn0);
+  bestPitchDac = pitchXn0;
+}
+if (labs(pitchfn1) < bestPitchErrAbs) {
+  bestPitchErrAbs = labs(pitchfn1);
+  bestPitchDac = pitchXn1;
+}
+if ((labs(pitchfn0) <= PitchCalibrationTolerance) || (labs(pitchfn1) <= PitchCalibrationTolerance)) {
+  break;
+}
+
+if ((pitchfn1 - pitchfn0) == 0) {
+  break;
+}
 pitchXn2=pitchXn1-((pitchXn1-pitchXn0)*pitchfn1)/(pitchfn1-pitchfn0); // new DAC value
+pitchXn2 = (int16_t)constrain((int32_t)pitchXn2, 0L, 4095L);
 
 
 pitchXn0 = pitchXn1;
@@ -864,24 +929,41 @@ l_iteration_pitch ++;
       
 delay(100);
 
-EEPROM.put(0,pitchXn0);
+const bool converged = (bestPitchErrAbs <= PitchCalibrationTolerance);
+const int16_t pitchDacCandidate = (int16_t)constrain((int32_t)bestPitchDac, 0L, 4095L);
+const bool signalOk = (pitchRaw0 > 0) && (pitchRaw1 > 0);
+const bool pitchCalOk = converged && signalOk;
+if (pitchCalOk) {
+  EEPROM.put(0,pitchDacCandidate);
+  pitchDAC = pitchDacCandidate;
+} else {
+  pitchDAC = oldPitchDac;
+}
 
 OT_DEBUG_PRINT("[DBG] calibrate_pitch result eepromPitchDAC=");
-OT_DEBUG_PRINT((int)pitchXn0);
+OT_DEBUG_PRINT((int)pitchDacCandidate);
 OT_DEBUG_PRINT(" q0=");
 OT_DEBUG_PRINT((long)q0);
 OT_DEBUG_PRINT(" target=");
 OT_DEBUG_PRINT(pitchfn);
+OT_DEBUG_PRINT(" raw0=");
+OT_DEBUG_PRINT(pitchRaw0);
+OT_DEBUG_PRINT(" raw1=");
+OT_DEBUG_PRINT(pitchRaw1);
 OT_DEBUG_PRINT(" f0=");
 OT_DEBUG_PRINT(pitchfn0);
 OT_DEBUG_PRINT(" f1=");
 OT_DEBUG_PRINT(pitchfn1);
+OT_DEBUG_PRINT(" bestAbs=");
+OT_DEBUG_PRINT(bestPitchErrAbs);
 OT_DEBUG_PRINT(" iterations=");
 OT_DEBUG_PRINTLN((unsigned int)l_iteration_pitch);
-  
+OT_DEBUG_PRINT("[DBG] calibrate_pitch status=");
+OT_DEBUG_PRINTLN(pitchCalOk ? "OK" : "FAIL");
+  return pitchCalOk;
 }
 
-void Application::calibrate_volume()
+bool Application::calibrate_volume()
 {
 
 
@@ -892,10 +974,13 @@ static float q0 = 0;
 static long volumefn0 = 0;
 static long volumefn1 = 0;
 static long volumefn = 0;
+static long volumeRaw0 = 0;
+static long volumeRaw1 = 0;
 
   // limit the number of calibration iteration to 12 
   // the algorythm used is normaly faster than dichotomy which normaly finds a 12Bit number in 12 iterations max
   static uint16_t l_iteration_volume = 0; 
+  const int16_t oldVolumeDac = volumeDAC;
     
   InitialiseVolumeMeasurement();
   interrupts();
@@ -905,7 +990,8 @@ static long volumefn = 0;
 volumeXn0 = 0;
 volumeXn1 = 4095;
 
-q0 = (16000000/qMeasurement*460765);
+// Match current edge-count units (legacy constant /32).
+q0 = (16000000/qMeasurement*(460765L/32L));  // ~14.4k in current measurement units
 volumefn = q0-VolumeFreqOffset;
 
 
@@ -913,17 +999,26 @@ volumefn = q0-VolumeFreqOffset;
 SPImcpDAC2Bsend(volumeXn0);
 delay_NOP(44316);//44316=100ms
 
-volumefn0 = GetVolumeMeasurement();
+volumeRaw0 = (long)GetVolumeMeasurement();
+volumefn0 = volumeRaw0 - volumefn;
 
 SPImcpDAC2Bsend(volumeXn1);
 
 delay_NOP(44316);//44316=100ms
-volumefn1 = GetVolumeMeasurement();
+volumeRaw1 = (long)GetVolumeMeasurement();
+volumefn1 = volumeRaw1 - volumefn;
+
+int16_t bestVolumeDac = volumeXn0;
+long bestVolumeErrAbs = labs(volumefn0);
+if (labs(volumefn1) < bestVolumeErrAbs) {
+  bestVolumeErrAbs = labs(volumefn1);
+  bestVolumeDac = volumeXn1;
+}
 
 
 
 l_iteration_volume = 0;
-while ((abs(volumefn0 - volumefn1) > VolumeCalibrationTolerance) && (l_iteration_volume < 12))
+while ((bestVolumeErrAbs > VolumeCalibrationTolerance) && (l_iteration_volume < 12))
 {
 
 SPImcpDAC2Bsend(volumeXn0);
@@ -932,9 +1027,25 @@ volumefn0 = GetVolumeMeasurement()-volumefn;
 
 SPImcpDAC2Bsend(volumeXn1);
 delay_NOP(44316);//44316=100ms
-volumefn1 = GetVolumeMeasurement()-volumefn;
+volumefn1 = (long)GetVolumeMeasurement()-volumefn;
 
+if (labs(volumefn0) < bestVolumeErrAbs) {
+  bestVolumeErrAbs = labs(volumefn0);
+  bestVolumeDac = volumeXn0;
+}
+if (labs(volumefn1) < bestVolumeErrAbs) {
+  bestVolumeErrAbs = labs(volumefn1);
+  bestVolumeDac = volumeXn1;
+}
+if ((labs(volumefn0) <= VolumeCalibrationTolerance) || (labs(volumefn1) <= VolumeCalibrationTolerance)) {
+  break;
+}
+
+if ((volumefn1 - volumefn0) == 0) {
+  break;
+}
 volumeXn2=volumeXn1-((volumeXn1-volumeXn0)*volumefn1)/(volumefn1-volumefn0); // calculate new DAC value
+volumeXn2 = (int16_t)constrain((int32_t)volumeXn2, 0L, 4095L);
 
 
 volumeXn0 = volumeXn1;
@@ -945,22 +1056,38 @@ HW_LED2_TOGGLE;
 l_iteration_volume ++;
 }
 
-EEPROM.put(2,volumeXn0);
+const bool converged = (bestVolumeErrAbs <= VolumeCalibrationTolerance);
+const int16_t volumeDacCandidate = (int16_t)constrain((int32_t)bestVolumeDac, 0L, 4095L);
+const bool signalOk = (volumeRaw0 > 0) && (volumeRaw1 > 0);
+const bool volumeCalOk = converged && signalOk;
+if (volumeCalOk) {
+  EEPROM.put(2,volumeDacCandidate);
+  volumeDAC = volumeDacCandidate;
+} else {
+  volumeDAC = oldVolumeDac;
+}
 
 OT_DEBUG_PRINT("[DBG] calibrate_volume result eepromVolDAC=");
-OT_DEBUG_PRINT((int)volumeXn0);
+OT_DEBUG_PRINT((int)volumeDacCandidate);
 OT_DEBUG_PRINT(" q0=");
 OT_DEBUG_PRINT((long)q0);
 OT_DEBUG_PRINT(" target=");
 OT_DEBUG_PRINT(volumefn);
+OT_DEBUG_PRINT(" raw0=");
+OT_DEBUG_PRINT(volumeRaw0);
+OT_DEBUG_PRINT(" raw1=");
+OT_DEBUG_PRINT(volumeRaw1);
 OT_DEBUG_PRINT(" f0=");
 OT_DEBUG_PRINT(volumefn0);
 OT_DEBUG_PRINT(" f1=");
 OT_DEBUG_PRINT(volumefn1);
+OT_DEBUG_PRINT(" bestAbs=");
+OT_DEBUG_PRINT(bestVolumeErrAbs);
 OT_DEBUG_PRINT(" iterations=");
 OT_DEBUG_PRINTLN((unsigned int)l_iteration_volume);
-
-
+OT_DEBUG_PRINT("[DBG] calibrate_volume status=");
+OT_DEBUG_PRINTLN(volumeCalOk ? "OK" : "FAIL");
+  return volumeCalOk;
 }
 
 // calculate log2 of an unsigned from 1 to 65535 into a 4.12 fixed point unsigned
@@ -1045,14 +1172,30 @@ void Application::playNote(float hz, uint16_t milliseconds = 500, uint8_t volume
 }
 
 void Application::playStartupSound() {
-  playNote(MIDDLE_C, 150, 25);
-  playNote(MIDDLE_C * 2, 150, 25);
-  playNote(MIDDLE_C * 4, 150, 25);
+  // Nicer calibration start cue: warm rising arpeggio.
+  playNote(MIDDLE_C * 0.75f, 110, 22);
+  playNote(MIDDLE_C,        110, 24);
+  playNote(MIDDLE_C * 1.5f, 120, 26);
+  playNote(MIDDLE_C * 2.0f, 150, 30);
 }
 
 void Application::playCalibratingCountdownSound() {
-  playNote(MIDDLE_C * 2, 150, 25);
-  playNote(MIDDLE_C * 2, 150, 25);
+  playNote(MIDDLE_C * 2.0f, 120, 24);
+  playNote(MIDDLE_C * 1.6f, 120, 24);
+}
+
+void Application::playCalibrationSuccessSound() {
+  // Bright upward confirmation.
+  playNote(MIDDLE_C * 1.5f, 100, 26);
+  playNote(MIDDLE_C * 2.0f, 100, 28);
+  playNote(MIDDLE_C * 3.0f, 180, 32);
+}
+
+void Application::playCalibrationFailedSound() {
+  // Clearly different: descending low "error" cue.
+  playNote(MIDDLE_C * 1.2f, 130, 26);
+  playNote(MIDDLE_C * 0.9f, 130, 26);
+  playNote(MIDDLE_C * 0.6f, 220, 30);
 }
 
 void Application::playModeSettingSound() {
