@@ -1890,21 +1890,26 @@ void Application::set_parameters ()
 {
   uint16_t data_steps;
   uint8_t paramIndex;
-  static const uint8_t kParamSlotCount = 9U;
+  uint8_t paramSlot;
+  const bool audioActive = (_mode == NORMAL);
+  const uint8_t kParamSlotCount = audioActive ? 4U : 5U;
+  static const uint8_t kAudioParamMap[4] = {0U, 1U, 2U, 8U};
+  static const uint8_t kMidiParamMap[5] = {3U, 4U, 5U, 6U, 7U};
   
   param_pot_value = readPotLegacy(REGISTER_SELECT_POT);
   data_pot_value = readPotLegacy(WAVE_SELECT_POT);
-  paramIndex = (uint8_t)(((uint32_t)param_pot_value * kParamSlotCount) >> 10);
-  if (paramIndex >= kParamSlotCount) {
-    paramIndex = kParamSlotCount - 1U;
+  paramSlot = (uint8_t)(((uint32_t)param_pot_value * kParamSlotCount) >> 10);
+  if (paramSlot >= kParamSlotCount) {
+    paramSlot = kParamSlotCount - 1U;
   }
+  paramIndex = audioActive ? kAudioParamMap[paramSlot] : kMidiParamMap[paramSlot];
 
   // If parameter pot moved
   if (abs((int32_t)param_pot_value - (int32_t)old_param_pot_value) >= 8)
   {
     // Function pot feedback: red LED only.
     resetTimer();
-    if ((paramIndex % 2U) == 0U)
+    if ((paramSlot % 2U) == 0U)
     {
       HW_LED1_OFF;
     }

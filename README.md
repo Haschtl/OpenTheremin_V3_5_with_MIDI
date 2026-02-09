@@ -143,15 +143,18 @@ Outgoing MIDI is sent on the current active channel (`midi_channel`), which defa
 
 ## Pot UI Behavior
 
-Parameter pot (`REGISTER_SELECT_POT`) has 8 segments:
+Parameter pot (`REGISTER_SELECT_POT`) is mode-dependent:
+- Audio-active (`NORMAL` mode): 4 segments
 - `0` Register (transpose)
 - `1` Tone preset (0..11)
 - `2` Timbre/wavetable (0..13)
-- `3` Rod mode
-- `4` Pitch-bend range
-- `5` Volume trigger
-- `6` Rod CC mode
-- `7` Loop CC mode
+- `3` Master out gain (10%..100%)
+- Standby (`MUTE` mode): 5 segments
+- `0` Rod mode (legato / pitch-bend mode)
+- `1` Pitch-bend range
+- `2` Trigger volume/velocity
+- `3` Rod CC mode
+- `4` Loop CC mode
 
 Value pot (`WAVE_SELECT_POT`) sets the currently selected segment value.
 
