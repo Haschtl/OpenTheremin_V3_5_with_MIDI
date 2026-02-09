@@ -79,6 +79,7 @@ static volatile uint32_t vibratoRateQ32 = 0;
 static volatile uint32_t jitterState = 0x1234ABCDUL;
 static volatile uint16_t masterOutGainQ8 = 256;
 static volatile uint16_t outputFadeGateQ8 = 0;
+static volatile uint32_t smoothedScaledVolumeQ8 = 0;
 static volatile int32_t biquadZ1 = 0;
 static volatile int32_t biquadZ2 = 0;
 
@@ -552,6 +553,14 @@ static inline void runWaveTick() {
   uint32_t scaledVolume = ((uint32_t)vScaledVolume * (uint32_t)masterOutGainQ8) >> 8;
   scaledVolume = (scaledVolume * (uint32_t)outputFadeGateQ8) >> 8;
   scaledVolume = (scaledVolume * (uint32_t)pitchLoudnessGainQ8(absIncrement)) >> 8;
+#if OT_AUDIO_VOLUME_SLEW_SHIFT > 0
+  {
+    uint32_t targetQ8 = scaledVolume << 8;
+    int32_t diff = (int32_t)targetQ8 - (int32_t)smoothedScaledVolumeQ8;
+    smoothedScaledVolumeQ8 = (uint32_t)((int32_t)smoothedScaledVolumeQ8 + (diff >> OT_AUDIO_VOLUME_SLEW_SHIFT));
+    scaledVolume = smoothedScaledVolumeQ8 >> 8;
+  }
+#endif
   if (scaledVolume > 65535UL) {
     scaledVolume = 65535UL;
   }
@@ -991,10 +1000,10 @@ uint8_t ihGetSoftClipCubicShift() {
 }
 
 void ihSetMasterOutGainQ8(uint16_t gainQ8) {
-  if (gainQ8 < 64U) {
-    gainQ8 = 64U;
-  } else if (gainQ8 > 512U) {
-    gainQ8 = 512U;
+  if (gainQ8 < 26U) {
+    gainQ8 = 26U;
+  } else if (gainQ8 > 256U) {
+    gainQ8 = 256U;
   }
   noInterrupts();
   masterOutGainQ8 = gainQ8;

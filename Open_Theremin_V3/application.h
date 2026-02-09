@@ -17,8 +17,6 @@ class Application {
     
   private:
     static const uint16_t MAX_VOLUME = 4095;
-    static const uint32_t TRIM_PITCH_FACTOR = 33554432;
-    static const uint32_t FREQ_FACTOR = 1600000000;
 
     static const int16_t BUTTON_PIN = OT_BUTTON_PIN;
     static const int16_t LED_PIN_1  = OT_LED1_PIN;
@@ -50,7 +48,6 @@ class Application {
     void InitialiseVolumeMeasurement();
     unsigned long GetPitchMeasurement();
     unsigned long GetVolumeMeasurement();
-    unsigned long GetQMeasurement();
 
 
     const float HZ_ADDVAL_FACTOR = 2.09785;

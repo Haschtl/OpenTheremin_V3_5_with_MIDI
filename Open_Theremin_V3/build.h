@@ -53,7 +53,21 @@
 
 // Antenna response gain (higher = more sensitive hand movement response).
 #define OT_PITCH_RESPONSE_GAIN 4
-#define OT_VOLUME_RESPONSE_GAIN 3
+#define OT_VOLUME_RESPONSE_GAIN 12
+// Volume raw capture sanitize guard (1 = enabled, 0 = disabled / Rev3-closer).
+#define OT_VOLUME_SANITIZE_ENABLE 1
+// 3-sample median prefilter on volume capture path (1 = enabled, 0 = disabled).
+#define OT_VOLUME_MEDIAN3_ENABLE 1
+// Volume low-pass strength: filtered += (raw - filtered) >> shift (0 = off, 1 = 50/50 mix, 2..4 smoother).
+#define OT_VOLUME_FILTER_SHIFT 3
+// Volume mapping scale shift after response gain multiply.
+#define OT_VOLUME_MAP_SHIFT 1
+// Ignore tiny control-path volume movement (in loop_hand_pos units, 0..255).
+#define OT_VOLUME_CONTROL_DEADBAND 2
+// Limit vScaledVolume step per control update (0 = disabled).
+#define OT_VOLUME_DELTA_LIMIT_PER_UPDATE 512
+// Audio-rate amplitude slew for anti-zipper noise: y += (target - y) >> shift (0 = off).
+#define OT_AUDIO_VOLUME_SLEW_SHIFT 9
 
 // Output fade gate (Q8 0..256) for smooth pause/unpause and startup transitions.
 // Every OT_OUTPUT_FADE_STEP_MS the gate moves by the configured Q8 step.
@@ -72,9 +86,9 @@
 // Morph speed between adjacent wavetables in Q8 domain per audio tick (1 = slow/smooth).
 #define OT_WAVEMORPH_STEP_Q8 1
 // Runtime-togglable defaults for advanced audio shaping features.
-#define OT_WAVEMORPH_ENABLE_DEFAULT 0
-#define OT_TILT_ENABLE_DEFAULT 0
-#define OT_SOFTCLIP_ENABLE_DEFAULT 0
+#define OT_WAVEMORPH_ENABLE_DEFAULT 1
+#define OT_TILT_ENABLE_DEFAULT 1
+#define OT_SOFTCLIP_ENABLE_DEFAULT 1
 #define OT_VIBRATO_ENABLE_DEFAULT 0
 // Start pitch-dependent darkening when absolute phase increment exceeds this value.
 #define OT_TILT_START_INCREMENT 512
@@ -86,7 +100,7 @@
 #define OT_TILT_CUTOFF_MIN_HZ 1800
 // Perceived loudness compensation for high pitch (based on absolute phase increment).
 // 1 = enable, 0 = disable.
-#define OT_PITCH_LOUDNESS_COMP_ENABLE 0
+#define OT_PITCH_LOUDNESS_COMP_ENABLE 1
 // Start applying attenuation above this absolute increment.
 #define OT_PITCH_LOUDNESS_COMP_START_INCREMENT 2600
 // Attenuation growth: attenQ8 = (absIncrement - start) >> slopeShift.
