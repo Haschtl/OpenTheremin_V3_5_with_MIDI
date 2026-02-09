@@ -67,6 +67,7 @@ static volatile uint16_t pointer = 0;
 static volatile uint8_t debounce_p = 0;
 static volatile uint8_t debounce_v = 0;
 static volatile uint16_t wavetableMorphQ8 = 0;
+static volatile uint16_t wavetableMorphTargetQ8 = 0;
 static volatile bool waveMorphEnabled = (OT_WAVEMORPH_ENABLE_DEFAULT != 0);
 static volatile bool toneTiltEnabled = (OT_TILT_ENABLE_DEFAULT != 0);
 static volatile bool softClipEnabled = (OT_SOFTCLIP_ENABLE_DEFAULT != 0);
@@ -489,8 +490,11 @@ static inline void runWaveTick() {
   #error "CV_ENABLED is not supported on UNO R4 backend"
 #else
   const uint8_t tableMax = (uint8_t)(OT_WAVETABLE_COUNT - 1U);
-  const uint8_t targetTable = (vWavetableSelector > tableMax) ? tableMax : vWavetableSelector;
-  const uint16_t targetMorphQ8 = ((uint16_t)targetTable) << 8;
+  const uint16_t targetMaxQ8 = ((uint16_t)tableMax) << 8;
+  uint16_t targetMorphQ8 = wavetableMorphTargetQ8;
+  if (targetMorphQ8 > targetMaxQ8) {
+    targetMorphQ8 = targetMaxQ8;
+  }
   if (waveMorphEnabled) {
     const uint16_t morphStepQ8 = (waveMorphStepQ8 == 0) ? 1U : (uint16_t)waveMorphStepQ8;
     if (wavetableMorphQ8 < targetMorphQ8) {
@@ -761,6 +765,7 @@ void ihInitialiseInterrupts() {
     const uint8_t tableMax = (uint8_t)(OT_WAVETABLE_COUNT - 1U);
     const uint8_t startTable = (vWavetableSelector > tableMax) ? tableMax : vWavetableSelector;
     wavetableMorphQ8 = ((uint16_t)startTable) << 8;
+    wavetableMorphTargetQ8 = wavetableMorphQ8;
   }
   biquadZ1 = 0;
   biquadZ2 = 0;
@@ -945,6 +950,17 @@ void ihSetSoftClipEnabled(bool enabled) {
 void ihSetWaveMorphStepQ8(uint8_t stepQ8) {
   noInterrupts();
   waveMorphStepQ8 = (stepQ8 == 0) ? 1 : stepQ8;
+  interrupts();
+}
+
+void ihSetWaveMorphTargetQ8(uint16_t targetQ8) {
+  const uint8_t tableMax = (uint8_t)(OT_WAVETABLE_COUNT - 1U);
+  const uint16_t targetMaxQ8 = ((uint16_t)tableMax) << 8;
+  if (targetQ8 > targetMaxQ8) {
+    targetQ8 = targetMaxQ8;
+  }
+  noInterrupts();
+  wavetableMorphTargetQ8 = targetQ8;
   interrupts();
 }
 

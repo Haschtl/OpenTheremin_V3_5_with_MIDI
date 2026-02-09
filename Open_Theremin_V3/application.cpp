@@ -196,6 +196,7 @@ static void applyCleanSineTestMode() {
 #if OT_TESTMODE_CLEAN_SINE
   // Freeze to clean baseline signal path for diagnostics.
   vWavetableSelector = 0;
+  ihSetWaveMorphTargetQ8(0);
   registerValue = 2;
   activeTonePreset = 0xFF;
   (void)setAudioRatePreset(0);
@@ -236,6 +237,7 @@ static void applyTonePreset(uint8_t preset) {
 
   const TonePreset &cfg = kTonePresets[preset];
   vWavetableSelector = min((uint8_t)(OT_WAVETABLE_COUNT - 1U), cfg.wavetable);
+  ihSetWaveMorphTargetQ8(((uint16_t)vWavetableSelector) << 8);
   registerValue = cfg.transpose;
   setAudioRatePreset(cfg.audioRatePreset);
   midi_bend_range = cfg.bendRange;
@@ -1498,6 +1500,7 @@ void Application::midi_handle_cc(uint8_t control, uint8_t value)
         uint16_t idx = ((uint16_t)value * (uint16_t)OT_WAVETABLE_COUNT) >> 7;
         if (idx >= OT_WAVETABLE_COUNT) idx = OT_WAVETABLE_COUNT - 1U;
         vWavetableSelector = (uint8_t)idx;
+        ihSetWaveMorphTargetQ8(((uint16_t)vWavetableSelector) << 8);
       }
       break;
     case OT_CC_AUDIO_RATE_PRESET:
@@ -1918,6 +1921,7 @@ void Application::set_parameters ()
   // Else If data pot moved
   else if (abs((int32_t)data_pot_value - (int32_t)old_data_pot_value) >= 8)
   {
+    bool resetAudioTimerAfterParam = true;
     // Modify selected parameter
     switch (paramIndex)
     {
@@ -1955,11 +1959,17 @@ void Application::set_parameters ()
 
     case 2:
       // Waveform
-      data_steps = (uint16_t)(((uint32_t)data_pot_value * (uint32_t)OT_WAVETABLE_COUNT) >> 10);
-      if (data_steps >= OT_WAVETABLE_COUNT) {
-        data_steps = OT_WAVETABLE_COUNT - 1U;
+      {
+        const uint16_t tableMaxQ8 = (uint16_t)((OT_WAVETABLE_COUNT - 1U) << 8);
+        const uint16_t morphTargetQ8 = (uint16_t)(((uint32_t)data_pot_value * (uint32_t)tableMaxQ8) / 1023U);
+        data_steps = (uint16_t)(morphTargetQ8 >> 8);
+        if (data_steps >= OT_WAVETABLE_COUNT) {
+          data_steps = OT_WAVETABLE_COUNT - 1U;
+        }
+        vWavetableSelector = (uint8_t)data_steps;
+        ihSetWaveMorphTargetQ8(morphTargetQ8);
+        resetAudioTimerAfterParam = false;
       }
-      vWavetableSelector = (uint8_t)data_steps;
       resetAudioFeatureDefaults();
       break;
         
@@ -2114,7 +2124,9 @@ void Application::set_parameters ()
     }
 
     // Value pot feedback: yellow LED only.
-    resetTimer();
+    if (resetAudioTimerAfterParam) {
+      resetTimer();
+    }
     if ((data_steps % 2U) == 0U)
     {
       HW_LED2_OFF;

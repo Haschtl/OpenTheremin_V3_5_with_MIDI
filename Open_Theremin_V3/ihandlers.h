@@ -47,6 +47,7 @@ void ihSetWaveMorphEnabled(bool enabled);
 void ihSetToneTiltEnabled(bool enabled);
 void ihSetSoftClipEnabled(bool enabled);
 void ihSetWaveMorphStepQ8(uint8_t stepQ8);
+void ihSetWaveMorphTargetQ8(uint16_t targetQ8);
 void ihSetToneTiltWetMax(uint8_t wetMax);
 void ihSetSoftClipCubicShift(uint8_t cubicShift);
 void ihSetVibratoJitterEnabled(bool enabled);
