@@ -52,7 +52,11 @@
 #define OT_POT_MEDIAN_SAMPLES 3
 
 // Antenna response gain (higher = more sensitive hand movement response).
-#define OT_PITCH_RESPONSE_GAIN 4
+#define OT_PITCH_RESPONSE_GAIN 22
+// Pitch response curve (0 = linear raw-delta mapping, 1 = nonlinear compression at larger deltas).
+#define OT_PITCH_CURVE_ENABLE 1
+// Curve strength for OT_PITCH_CURVE_ENABLE (higher = stronger compression near antenna).
+#define OT_PITCH_CURVE_K 64
 #define OT_VOLUME_RESPONSE_GAIN 12
 // Volume raw capture sanitize guard (1 = enabled, 0 = disabled / Rev3-closer).
 #define OT_VOLUME_SANITIZE_ENABLE 1
@@ -112,7 +116,7 @@
 // Subtle vibrato/jitter tuning (applied to oscillator phase increment).
 #define OT_VIBRATO_HZ_X100 500
 // #define OT_VIBRATO_DEPTH_PPM 2500
-#define OT_VIBRATO_DEPTH_PPM 0
+#define OT_VIBRATO_DEPTH_PPM 25000
 #define OT_JITTER_DEPTH_PPM 0
 
 // MIDI IN control channel (0..15 => MIDI channels 1..16).

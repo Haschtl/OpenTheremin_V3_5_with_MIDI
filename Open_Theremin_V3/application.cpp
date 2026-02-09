@@ -431,6 +431,20 @@ static inline uint32_t median3U32(uint32_t a, uint32_t b, uint32_t c) {
   return b;
 }
 
+static inline int32_t applyPitchResponseCurve(int32_t rawDelta) {
+#if OT_PITCH_CURVE_ENABLE
+  const int32_t k = (OT_PITCH_CURVE_K <= 0) ? 1 : (int32_t)OT_PITCH_CURVE_K;
+  const int32_t absDelta = (rawDelta < 0) ? -rawDelta : rawDelta;
+  const int64_t denom = 4096LL + (((int64_t)k * (int64_t)absDelta) >> 10);
+  if (denom <= 0) {
+    return rawDelta;
+  }
+  return (int32_t)(((int64_t)rawDelta * 4096LL) / denom);
+#else
+  return rawDelta;
+#endif
+}
+
 static bool waitForCaptureSample(volatile bool *flag, uint32_t timeoutMs) {
   const uint32_t t0 = millis();
   while (!(*flag)) {
@@ -922,7 +936,9 @@ void Application::loop() {
       case MUTE : /* NOTHING! */;                                        break;
       case NORMAL: {
         const uint8_t transposeShift = (registerValue < 1U) ? 1U : ((registerValue > 6U) ? 6U : registerValue);
-        setWavetableSampleAdvance((((pitch_v - pitchCalibrationBase) >> 2) + 2048 - ((int32_t)pitchPotValue << 1)) >> transposeShift);
+        const int32_t rawPitchDelta = (((pitch_v - pitchCalibrationBase) * (int32_t)OT_PITCH_RESPONSE_GAIN) >> 2);
+        const int32_t pitchDelta = applyPitchResponseCurve(rawPitchDelta);
+        setWavetableSampleAdvance((pitchDelta + 2048 - ((int32_t)pitchPotValue << 1)) >> transposeShift);
         break;
       }
     };
