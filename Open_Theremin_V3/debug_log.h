@@ -3,11 +3,11 @@
 
 #include <Arduino.h>
 
-#if defined(DEBUG)
-#define OT_DEBUG_ENABLED 1
-#else
-#define OT_DEBUG_ENABLED 0
+#ifndef OT_DEBUG_LOG_ENABLE
+  #define OT_DEBUG_LOG_ENABLE 0
 #endif
+
+#define OT_DEBUG_ENABLED OT_DEBUG_LOG_ENABLE
 
 #ifndef OT_DEBUG_BAUD
 #define OT_DEBUG_BAUD 115200
@@ -19,6 +19,14 @@
 
 #ifndef OT_DEBUG_RUNTIME_LOGS
 #define OT_DEBUG_RUNTIME_LOGS 0
+#endif
+
+#ifndef OT_DEBUG_SENSOR_LOGS
+#define OT_DEBUG_SENSOR_LOGS 1
+#endif
+
+#ifndef OT_DEBUG_SENSOR_LOG_MS
+#define OT_DEBUG_SENSOR_LOG_MS 300
 #endif
 
 // Default to USB serial so debug output is visible in PlatformIO monitor.

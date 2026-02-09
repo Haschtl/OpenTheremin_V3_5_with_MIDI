@@ -3,15 +3,15 @@
 
 #include "Arduino.h"
 
-extern volatile uint16_t pitch;              // Pitch value
-extern volatile uint16_t vol;                // Volume value
+extern volatile uint32_t pitch;              // Pitch value
+extern volatile uint32_t vol;                // Volume value
 extern volatile uint16_t vScaledVolume;      // Volume byte
 
-extern volatile uint16_t pitch_counter;      // Pitch counter
-extern volatile uint16_t pitch_counter_l;    // Last value of pitch counter
+extern volatile uint32_t pitch_counter;      // Pitch counter
+extern volatile uint32_t pitch_counter_l;    // Last value of pitch counter
 
-extern volatile uint16_t vol_counter;      // Pitch counter
-extern volatile uint16_t vol_counter_l;    // Last value of pitch counter
+extern volatile uint32_t vol_counter;      // Pitch counter
+extern volatile uint32_t vol_counter_l;    // Last value of pitch counter
 
 extern volatile bool volumeValueAvailable;   // Volume read flag
 extern volatile bool pitchValueAvailable;    // Pitch read flag
@@ -40,6 +40,9 @@ void ihInitialiseVolumeMeasurement();
 void ihRecoverTimer();
 uint32_t ihGetAudioTickHz();
 bool ihSetAudioTickHz(uint32_t hz);
+uint32_t ihGetWaveTickCount();
+uint32_t ihGetPitchCaptureCount();
+uint32_t ihGetVolumeCaptureCount();
 void ihSetWaveMorphEnabled(bool enabled);
 void ihSetToneTiltEnabled(bool enabled);
 void ihSetSoftClipEnabled(bool enabled);
@@ -54,6 +57,10 @@ bool ihGetVibratoJitterEnabled();
 uint8_t ihGetWaveMorphStepQ8();
 uint8_t ihGetToneTiltWetMax();
 uint8_t ihGetSoftClipCubicShift();
+void ihSetMasterOutGainQ8(uint16_t gainQ8);
+uint16_t ihGetMasterOutGainQ8();
+void ihSetOutputFadeGateQ8(uint16_t gateQ8);
+uint16_t ihGetOutputFadeGateQ8();
 void resetPitchFlag();
 void resetVolFlag();
 void savePitchCounter();

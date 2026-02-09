@@ -8,9 +8,21 @@
 // Set to build with control voltage output (experimental)
 #define CV_ENABLED 0
 
+// Split controls:
+// - OT_DEBUG_LOG_ENABLE: enables text debug logs/macros.
+// - OT_SERIAL_MIDI_ENABLE: enables MIDI byte stream over USB CDC Serial.
+// Defaults preserve previous behavior (DEBUG build => logs on, serial MIDI off).
+#ifndef OT_DEBUG_LOG_ENABLE
+  #define OT_DEBUG_LOG_ENABLE 0
+#endif
+
+#ifndef OT_SERIAL_MIDI_ENABLE
+  #define OT_SERIAL_MIDI_ENABLE 0
+#endif
+
 // DAC SPI clock (MCP49xx max is typically 20MHz, but board/shield wiring is often
 // more stable at 12MHz).
-#define OT_SPI_CLOCK_HZ 12000000
+#define OT_SPI_CLOCK_HZ 20000000
 
 // Optional SPI DMA backend (UNO R4 FSP SPI + DTC path).
 #define OT_USE_DMA 0
@@ -27,23 +39,43 @@
 
 // Timer selection:
 // 0 = prefer GPT (default core behavior), 1 = prefer AGT (often more robust on some R4 setups).
-#define OT_TIMER_PREFER_AGT 1
+#define OT_TIMER_PREFER_AGT 0
 
 // Audio rate preset helper in application.cpp:
 // 0 = 31.25kHz, 1 = 40kHz, 2 = 48kHz, 3 = custom OT_AUDIO_TICK_HZ.
 #define OT_AUDIO_RATE_PRESET 0
+// Safety cap for runtime preset switching to avoid unstable high-rate timer restarts.
+// Set to 0 to disable capping.
+#define OT_AUDIO_TICK_SAFE_MAX_HZ 40000
 
 // Median filtering for analog pots (odd number, currently supported: 3).
 #define OT_POT_MEDIAN_SAMPLES 3
+
+// Antenna response gain (higher = more sensitive hand movement response).
+#define OT_PITCH_RESPONSE_GAIN 4
+#define OT_VOLUME_RESPONSE_GAIN 3
+
+// Output fade gate (Q8 0..256) for smooth pause/unpause and startup transitions.
+// Every OT_OUTPUT_FADE_STEP_MS the gate moves by the configured Q8 step.
+#define OT_OUTPUT_FADE_STEP_MS 2
+#define OT_OUTPUT_FADE_UP_STEP_Q8 4
+#define OT_OUTPUT_FADE_DOWN_STEP_Q8 8
+
+// Clean-sine diagnostics mode:
+// 1 = lock to plain sine voice and fixed clean engine settings (ignores parameter/value pot changes).
+// 0 = normal instrument behavior.
+#ifndef OT_TESTMODE_CLEAN_SINE
+#define OT_TESTMODE_CLEAN_SINE 0
+#endif
 
 // Audio timbre shaping controls.
 // Morph speed between adjacent wavetables in Q8 domain per audio tick (1 = slow/smooth).
 #define OT_WAVEMORPH_STEP_Q8 1
 // Runtime-togglable defaults for advanced audio shaping features.
-#define OT_WAVEMORPH_ENABLE_DEFAULT 1
-#define OT_TILT_ENABLE_DEFAULT 1
-#define OT_SOFTCLIP_ENABLE_DEFAULT 1
-#define OT_VIBRATO_ENABLE_DEFAULT 1
+#define OT_WAVEMORPH_ENABLE_DEFAULT 0
+#define OT_TILT_ENABLE_DEFAULT 0
+#define OT_SOFTCLIP_ENABLE_DEFAULT 0
+#define OT_VIBRATO_ENABLE_DEFAULT 0
 // Start pitch-dependent darkening when absolute phase increment exceeds this value.
 #define OT_TILT_START_INCREMENT 512
 // Max wet amount (0..255) for pitch-dependent darkening blend.
@@ -52,12 +84,22 @@
 #define OT_TILT_BIQUAD_Q_X1000 707
 #define OT_TILT_CUTOFF_MAX_HZ 8000
 #define OT_TILT_CUTOFF_MIN_HZ 1800
+// Perceived loudness compensation for high pitch (based on absolute phase increment).
+// 1 = enable, 0 = disable.
+#define OT_PITCH_LOUDNESS_COMP_ENABLE 0
+// Start applying attenuation above this absolute increment.
+#define OT_PITCH_LOUDNESS_COMP_START_INCREMENT 2600
+// Attenuation growth: attenQ8 = (absIncrement - start) >> slopeShift.
+#define OT_PITCH_LOUDNESS_COMP_SLOPE_SHIFT 5
+// Max attenuation in Q8 (0..255). Example 96 ~= -37.5%.
+#define OT_PITCH_LOUDNESS_COMP_MAX_ATTEN_Q8 127
 // Soft-clip enable and drive (lower shift => stronger saturation).
 #define OT_SOFTCLIP_CUBIC_SHIFT 24
 // Subtle vibrato/jitter tuning (applied to oscillator phase increment).
 #define OT_VIBRATO_HZ_X100 500
-#define OT_VIBRATO_DEPTH_PPM 2500
-#define OT_JITTER_DEPTH_PPM 700
+// #define OT_VIBRATO_DEPTH_PPM 2500
+#define OT_VIBRATO_DEPTH_PPM 0
+#define OT_JITTER_DEPTH_PPM 0
 
 // MIDI IN control channel (0..15 => MIDI channels 1..16).
 #define OT_MIDI_IN_CHANNEL 0

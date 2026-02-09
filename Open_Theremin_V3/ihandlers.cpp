@@ -10,6 +10,7 @@
 
 #include "build.h"
 #include <math.h>
+#include <stdint.h>
 
 #if __has_include(<FspTimer.h>)
   #include <FspTimer.h>
@@ -47,18 +48,18 @@ const int16_t* const wavetables[] = {
 volatile uint16_t vScaledVolume = 0;
 volatile uint16_t vPointerIncrement = 0;
 
-volatile uint16_t pitch = 0;
-volatile uint16_t pitch_counter = 0;
-volatile uint16_t pitch_counter_l = 0;
+volatile uint32_t pitch = 0;
+volatile uint32_t pitch_counter = 0;
+volatile uint32_t pitch_counter_l = 0;
 
 volatile bool volumeValueAvailable = 0;
 volatile bool pitchValueAvailable = 0;
 volatile bool reenableInt1 = 0;
 
-volatile uint16_t vol;
-volatile uint16_t vol_counter = 0;
-volatile uint16_t vol_counter_i = 0;
-volatile uint16_t vol_counter_l;
+volatile uint32_t vol;
+volatile uint32_t vol_counter = 0;
+volatile uint32_t vol_counter_i = 0;
+volatile uint32_t vol_counter_l;
 
 volatile uint8_t vWavetableSelector = 0;
 
@@ -76,6 +77,8 @@ static volatile uint8_t softClipCubicShift = OT_SOFTCLIP_CUBIC_SHIFT;
 static volatile uint32_t vibratoPhaseQ32 = 0;
 static volatile uint32_t vibratoRateQ32 = 0;
 static volatile uint32_t jitterState = 0x1234ABCDUL;
+static volatile uint16_t masterOutGainQ8 = 256;
+static volatile uint16_t outputFadeGateQ8 = 0;
 static volatile int32_t biquadZ1 = 0;
 static volatile int32_t biquadZ2 = 0;
 
@@ -90,17 +93,207 @@ struct BiquadCoeff {
 static BiquadCoeff biquadTable[BIQUAD_TABLE_SIZE];
 
 static volatile bool int1Enabled = false;
-static volatile uint16_t pitch_capture_counter_i = 0;
+static volatile uint32_t pitch_capture_counter_i = 0;
+static volatile uint32_t wave_tick_count = 0;
+static volatile uint32_t pitch_capture_count = 0;
+static volatile uint32_t volume_capture_count = 0;
+static volatile uint32_t pitch_capture_raw_last = 0;
+static volatile uint32_t volume_capture_raw_last = 0;
+static volatile bool pitch_capture_seen = false;
+static volatile bool volume_capture_seen = false;
 
 static FspTimer waveTimer;
 static bool waveTimerStarted = false;
 static uint8_t waveTimerType = (OT_TIMER_PREFER_AGT != 0) ? AGT_TIMER : GPT_TIMER;
 static int8_t waveTimerChannel = -1;
 static volatile uint32_t currentAudioTickHz = OT_AUDIO_TICK_HZ;
+static FspTimer pitchCaptureTimer;
+static FspTimer volumeCaptureTimer;
+static bool pitchCaptureStarted = false;
+static bool volumeCaptureStarted = false;
+static uint8_t pitchCaptureChannel = 0xFF;
+static uint8_t volumeCaptureChannel = 0xFF;
+static bool pitchCaptureUseA = true;
+static bool volumeCaptureUseA = true;
+static uint32_t pitchCaptureDeltaMask = 0xFFFFFFFFUL;
+static uint32_t volumeCaptureDeltaMask = 0xFFFFFFFFUL;
 
-static inline uint16_t readTimerCounter16() {
-  // 1MHz monotonic source converted to ~16MHz virtual ticks for legacy math.
-  return (uint16_t)((micros() * 16UL) & 0xFFFF);
+#if OT_TIMER_CB_HAS_ARGS
+static void onPitchCaptureTimer(timer_callback_args_t *p_args);
+static void onVolumeCaptureTimer(timer_callback_args_t *p_args);
+#endif
+
+static void releaseWaveTimerResource() {
+  // `close()` alone does not mark FspTimer channel as free in the core.
+  // `end()` releases the channel allocation bookkeeping.
+  waveTimer.end();
+  waveTimerStarted = false;
+}
+
+static inline bool isGpt16BitChannel(uint8_t channel) {
+  return channel >= GTP32_HOWMANY;
+}
+
+static inline uint32_t capturePeriodCountsForChannel(uint8_t channel) {
+  return isGpt16BitChannel(channel) ? 65535UL : 0xFFFFFFFFUL;
+}
+
+static inline uint32_t normalizeCaptureDelta(uint32_t now, uint32_t last, uint32_t deltaMask) {
+  return (now - last) & deltaMask;
+}
+
+static bool setupCapturePinAndChannel(uint8_t pin, uint8_t &channel, bool &useA) {
+  const auto cfgs = getPinCfgs(pin, PIN_CFG_REQ_PWM);
+  if (cfgs[0] == 0U) {
+    return false;
+  }
+  channel = (uint8_t)GET_CHANNEL(cfgs[0]);
+  useA = IS_PWM_ON_A(cfgs[0]);
+  const uint32_t pinCfg = (uint32_t)(IOPORT_CFG_PERIPHERAL_PIN | IOPORT_PERIPHERAL_GPT1);
+  return (R_IOPORT_PinCfg(&g_ioport_ctrl, digitalPinToBspPin(pin), pinCfg) == FSP_SUCCESS);
+}
+
+static void configureCapturePinsAsGpioInput() {
+  pinMode(OT_VOLUME_CAPTURE_PIN, INPUT);
+  pinMode(OT_PITCH_CAPTURE_PIN, INPUT);
+}
+
+static bool configureCaptureSource(FspTimer &timer, bool useA) {
+  if (useA) {
+    const gpt_source_t src = (gpt_source_t)(
+      GPT_SOURCE_GTIOCA_RISING_WHILE_GTIOCB_LOW |
+      GPT_SOURCE_GTIOCA_RISING_WHILE_GTIOCB_HIGH
+    );
+    return timer.set_source_capture_a(src) && timer.setup_capture_a_irq();
+  }
+  const gpt_source_t src = (gpt_source_t)(
+    GPT_SOURCE_GTIOCB_RISING_WHILE_GTIOCA_LOW |
+    GPT_SOURCE_GTIOCB_RISING_WHILE_GTIOCA_HIGH
+  );
+  return timer.set_source_capture_b(src) && timer.setup_capture_b_irq();
+}
+
+static bool startCaptureTimer(FspTimer &timer,
+                              bool &started,
+                              uint8_t pin,
+                              uint8_t &channel,
+                              bool &useA,
+                              uint32_t &deltaMask,
+                              GPTimerCbk_f callback,
+                              const char *label) {
+  if (started) {
+    return true;
+  }
+
+  if (!setupCapturePinAndChannel(pin, channel, useA)) {
+    OT_DEBUG_PRINT("[DBG] capture ");
+    OT_DEBUG_PRINT(label);
+    OT_DEBUG_PRINTLN_F(": pin cfg failed");
+    setErrorIndicator(OT_ERR_TIMER);
+    return false;
+  }
+
+  deltaMask = isGpt16BitChannel(channel) ? 0x0000FFFFUL : 0xFFFFFFFFUL;
+  const uint32_t periodCounts = capturePeriodCountsForChannel(channel);
+
+  OT_DEBUG_PRINT("[DBG] capture ");
+  OT_DEBUG_PRINT(label);
+  OT_DEBUG_PRINT(" timer: GPT ch=");
+  OT_DEBUG_PRINT((int)channel);
+  OT_DEBUG_PRINT(" line=");
+  OT_DEBUG_PRINTLN(useA ? "A" : "B");
+
+  // Capture pins can be on channels pre-marked as PWM-reserved by the core (e.g. D8 on GPT7).
+  // We intentionally claim that channel for input-capture in this project.
+  FspTimer::force_use_of_pwm_reserved_timer();
+  if (!timer.begin(TIMER_MODE_PERIODIC,
+                   GPT_TIMER,
+                   channel,
+                   periodCounts,
+                   0UL,
+                   TIMER_SOURCE_DIV_1,
+                   callback,
+                   nullptr)) {
+    OT_DEBUG_PRINT("[DBG] capture ");
+    OT_DEBUG_PRINT(label);
+    OT_DEBUG_PRINTLN_F(": begin failed");
+    setErrorIndicator(OT_ERR_TIMER);
+    timer.end();
+    return false;
+  }
+
+  if (!configureCaptureSource(timer, useA)) {
+    OT_DEBUG_PRINT("[DBG] capture ");
+    OT_DEBUG_PRINT(label);
+    OT_DEBUG_PRINTLN_F(": capture source/irq failed");
+    setErrorIndicator(OT_ERR_TIMER);
+    timer.end();
+    return false;
+  }
+
+  if (!timer.open()) {
+    OT_DEBUG_PRINT("[DBG] capture ");
+    OT_DEBUG_PRINT(label);
+    OT_DEBUG_PRINTLN_F(": open failed");
+    setErrorIndicator(OT_ERR_TIMER);
+    timer.end();
+    return false;
+  }
+
+  if (!timer.start()) {
+    OT_DEBUG_PRINT("[DBG] capture ");
+    OT_DEBUG_PRINT(label);
+    OT_DEBUG_PRINTLN_F(": start failed");
+    setErrorIndicator(OT_ERR_TIMER);
+    timer.end();
+    return false;
+  }
+
+  started = true;
+  return true;
+}
+
+static void stopCaptureTimer(FspTimer &timer, bool &started) {
+  if (started) {
+    (void)timer.stop();
+  }
+  timer.end();
+  started = false;
+}
+
+static void stopCaptureTimers() {
+  stopCaptureTimer(pitchCaptureTimer, pitchCaptureStarted);
+  stopCaptureTimer(volumeCaptureTimer, volumeCaptureStarted);
+}
+
+static bool startCaptureTimers() {
+#if !OT_TIMER_CB_HAS_ARGS
+  #error "GPT input capture requires timer_callback_args_t support on UNO R4."
+#endif
+  if (!startCaptureTimer(pitchCaptureTimer,
+                         pitchCaptureStarted,
+                         OT_PITCH_CAPTURE_PIN,
+                         pitchCaptureChannel,
+                         pitchCaptureUseA,
+                         pitchCaptureDeltaMask,
+                         onPitchCaptureTimer,
+                         "pitch")) {
+    return false;
+  }
+
+  if (!startCaptureTimer(volumeCaptureTimer,
+                         volumeCaptureStarted,
+                         OT_VOLUME_CAPTURE_PIN,
+                         volumeCaptureChannel,
+                         volumeCaptureUseA,
+                         volumeCaptureDeltaMask,
+                         onVolumeCaptureTimer,
+                         "volume")) {
+    stopCaptureTimer(pitchCaptureTimer, pitchCaptureStarted);
+    return false;
+  }
+
+  return true;
 }
 
 static inline void updateVibratoRate() {
@@ -259,10 +452,31 @@ static inline int16_t softClip12Bit(int32_t x) {
   return (int16_t)y;
 }
 
+static inline uint16_t pitchLoudnessGainQ8(uint16_t absIncrement) {
+#if OT_PITCH_LOUDNESS_COMP_ENABLE
+  if (absIncrement <= OT_PITCH_LOUDNESS_COMP_START_INCREMENT) {
+    return 256U;
+  }
+  uint16_t atten = (uint16_t)((absIncrement - OT_PITCH_LOUDNESS_COMP_START_INCREMENT) >> OT_PITCH_LOUDNESS_COMP_SLOPE_SHIFT);
+  uint16_t maxAtten = OT_PITCH_LOUDNESS_COMP_MAX_ATTEN_Q8;
+  if (maxAtten > 255U) {
+    maxAtten = 255U;
+  }
+  if (atten > maxAtten) {
+    atten = maxAtten;
+  }
+  return (uint16_t)(256U - atten);
+#else
+  (void)absIncrement;
+  return 256U;
+#endif
+}
+
 static inline void runWaveTick() {
   if (!int1Enabled) {
     return;
   }
+  wave_tick_count++;
 
   SPImcpDAClatch();
 
@@ -335,7 +549,13 @@ static inline void runWaveTick() {
     biquadZ2 = 0;
   }
 
-  int32_t scaledSample = (waveSample * (int32_t)vScaledVolume) >> 16;
+  uint32_t scaledVolume = ((uint32_t)vScaledVolume * (uint32_t)masterOutGainQ8) >> 8;
+  scaledVolume = (scaledVolume * (uint32_t)outputFadeGateQ8) >> 8;
+  scaledVolume = (scaledVolume * (uint32_t)pitchLoudnessGainQ8(absIncrement)) >> 8;
+  if (scaledVolume > 65535UL) {
+    scaledVolume = 65535UL;
+  }
+  int32_t scaledSample = (waveSample * (int32_t)scaledVolume) >> 16;
   scaledSample = softClip12Bit(scaledSample);
   int32_t dacValue = scaledSample + (int32_t)MCP_DAC_BASE;
   if (dacValue < 0) {
@@ -373,25 +593,6 @@ static inline void runWaveTick() {
   incrementTimer();
   incrementMidiTimer();
 
-  debounce_p++;
-  if (debounce_p == 3) {
-    pitch_counter = pitch_capture_counter_i;
-    pitch = (pitch_counter - pitch_counter_l);
-    pitch_counter_l = pitch_counter;
-  }
-  if (debounce_p == 5) {
-    pitchValueAvailable = true;
-  }
-
-  debounce_v++;
-  if (debounce_v == 3) {
-    vol_counter = vol_counter_i;
-    vol = (vol_counter - vol_counter_l);
-    vol_counter_l = vol_counter;
-  }
-  if (debounce_v == 5) {
-    volumeValueAvailable = true;
-  }
 }
 
 #if OT_TIMER_CB_HAS_ARGS
@@ -399,21 +600,65 @@ static void onWaveTimerTick(timer_callback_args_t *p_args) {
   (void)p_args;
   runWaveTick();
 }
+
+static void onPitchCaptureTimer(timer_callback_args_t *p_args) {
+  if (p_args == nullptr) {
+    return;
+  }
+  if (p_args->event != TIMER_EVENT_CAPTURE_A && p_args->event != TIMER_EVENT_CAPTURE_B) {
+    return;
+  }
+
+  pitch_capture_count++;
+  const uint32_t captureNow = p_args->capture;
+  const uint32_t prev = pitch_capture_raw_last;
+  pitch_capture_raw_last = captureNow;
+
+  if (!pitch_capture_seen) {
+    pitch_capture_seen = true;
+    return;
+  }
+
+  const uint32_t delta = normalizeCaptureDelta(captureNow, prev, pitchCaptureDeltaMask);
+  if (delta > 0U) {
+    pitch_capture_counter_i = delta;
+    pitch_counter = delta;
+    pitch = delta;
+    pitchValueAvailable = true;
+  }
+}
+
+static void onVolumeCaptureTimer(timer_callback_args_t *p_args) {
+  if (p_args == nullptr) {
+    return;
+  }
+  if (p_args->event != TIMER_EVENT_CAPTURE_A && p_args->event != TIMER_EVENT_CAPTURE_B) {
+    return;
+  }
+
+  volume_capture_count++;
+  const uint32_t captureNow = p_args->capture;
+  const uint32_t prev = volume_capture_raw_last;
+  volume_capture_raw_last = captureNow;
+
+  if (!volume_capture_seen) {
+    volume_capture_seen = true;
+    return;
+  }
+
+  const uint32_t delta = normalizeCaptureDelta(captureNow, prev, volumeCaptureDeltaMask);
+  if (delta > 0U) {
+    vol_counter_i = delta;
+    vol_counter = delta;
+    vol = delta;
+    volumeValueAvailable = true;
+  }
+}
 #else
 static void onWaveTimerTick() {
   runWaveTick();
 }
 #endif
-
-static void onPitchCapture() {
-  pitch_capture_counter_i = readTimerCounter16();
-  debounce_p = 0;
-}
-
-static void onVolumeCapture() {
-  vol_counter_i = readTimerCounter16();
-  debounce_v = 0;
-}
 
 void ihDisableInt1() {
   int1Enabled = false;
@@ -425,34 +670,14 @@ void ihEnableInt1() {
   }
 }
 
-static void attachCaptureInterrupts() {
-  const pin_size_t volumeInterrupt = digitalPinToInterrupt(OT_VOLUME_CAPTURE_PIN);
-  const pin_size_t pitchInterrupt = digitalPinToInterrupt(OT_PITCH_CAPTURE_PIN);
-  attachInterrupt(volumeInterrupt, onVolumeCapture, RISING);
-  attachInterrupt(pitchInterrupt, onPitchCapture, RISING);
-}
-
-static void detachCaptureInterrupts() {
-  const pin_size_t volumeInterrupt = digitalPinToInterrupt(OT_VOLUME_CAPTURE_PIN);
-  const pin_size_t pitchInterrupt = digitalPinToInterrupt(OT_PITCH_CAPTURE_PIN);
-  detachInterrupt(volumeInterrupt);
-  detachInterrupt(pitchInterrupt);
-}
-
 static bool startWaveTimer() {
   if (waveTimerStarted) {
     return true;
   }
 
   if (waveTimerChannel < 0) {
-    uint8_t selectedType = waveTimerType;
-    int8_t selectedChannel = FspTimer::get_available_timer(selectedType);
-    if (selectedChannel < 0) {
-      selectedType = (waveTimerType == GPT_TIMER) ? AGT_TIMER : GPT_TIMER;
-      selectedChannel = FspTimer::get_available_timer(selectedType);
-    }
-    waveTimerType = selectedType;
-    waveTimerChannel = selectedChannel;
+    // Pick one channel/type once and keep it fixed for all later restarts.
+    waveTimerChannel = FspTimer::get_available_timer(waveTimerType);
   }
 
   if (waveTimerChannel < 0) {
@@ -473,7 +698,7 @@ static bool startWaveTimer() {
   if (!waveTimer.begin(TIMER_MODE_PERIODIC, waveTimerType, waveTimerChannel, (float)currentAudioTickHz, 0.0f, onWaveTimerTick)) {
     OT_DEBUG_PRINTLN_F("[DBG] timer: begin failed");
     setErrorIndicator(OT_ERR_TIMER);
-    waveTimerChannel = -1;
+    releaseWaveTimerResource();
     return false;
   }
 
@@ -481,7 +706,7 @@ static bool startWaveTimer() {
   if (!waveTimer.setup_overflow_irq()) {
     OT_DEBUG_PRINTLN_F("[DBG] timer: setup irq failed");
     setErrorIndicator(OT_ERR_TIMER);
-    waveTimerChannel = -1;
+    releaseWaveTimerResource();
     return false;
   }
 
@@ -489,7 +714,7 @@ static bool startWaveTimer() {
   if (!waveTimer.open()) {
     OT_DEBUG_PRINTLN_F("[DBG] timer: open failed");
     setErrorIndicator(OT_ERR_TIMER);
-    waveTimerChannel = -1;
+    releaseWaveTimerResource();
     return false;
   }
 
@@ -497,7 +722,7 @@ static bool startWaveTimer() {
   if (!waveTimer.start()) {
     OT_DEBUG_PRINTLN_F("[DBG] timer: start failed");
     setErrorIndicator(OT_ERR_TIMER);
-    waveTimerChannel = -1;
+    releaseWaveTimerResource();
     return false;
   }
 
@@ -510,15 +735,10 @@ static bool startWaveTimer() {
 }
 
 static void stopWaveTimer() {
-  if (!waveTimerStarted) {
-    return;
+  if (waveTimerStarted) {
+    (void)waveTimer.stop();
   }
-
-  waveTimer.stop();
-  waveTimer.close();
-  waveTimerStarted = false;
-  waveTimerChannel = -1;
-  waveTimerType = (OT_TIMER_PREFER_AGT != 0) ? AGT_TIMER : GPT_TIMER;
+  releaseWaveTimerResource();
 }
 
 void ihInitialiseTimer() {
@@ -538,7 +758,21 @@ void ihInitialiseInterrupts() {
   rebuildBiquadTable();
   updateVibratoRate();
   vibratoPhaseQ32 = 0;
-  attachCaptureInterrupts();
+  noInterrupts();
+  wave_tick_count = 0;
+  pitch_capture_count = 0;
+  volume_capture_count = 0;
+  pitch_capture_raw_last = 0;
+  volume_capture_raw_last = 0;
+  pitch_capture_seen = false;
+  volume_capture_seen = false;
+  pitchValueAvailable = false;
+  volumeValueAvailable = false;
+  interrupts();
+  OT_DEBUG_PRINTLN_F("[DBG] capture source=GPT input capture");
+  if (!startCaptureTimers()) {
+    return;
+  }
   (void)startWaveTimer();
 }
 
@@ -546,7 +780,8 @@ void ihInitialisePitchMeasurement() {
   reenableInt1 = false;
   int1Enabled = false;
   stopWaveTimer();
-  detachCaptureInterrupts();
+  stopCaptureTimers();
+  configureCapturePinsAsGpioInput();
 }
 
 void ihInitialiseVolumeMeasurement() {
@@ -589,18 +824,95 @@ bool ihSetAudioTickHz(uint32_t hz) {
 
 void ihRecoverTimer() {
   static uint32_t lastAttemptMs = 0;
-  if (waveTimerStarted || !reenableInt1) {
+  static uint32_t lastTickCount = 0;
+  static uint32_t lastPitchCaptureCount = 0;
+  static uint32_t lastVolumeCaptureCount = 0;
+  static uint32_t lastProgressCheckMs = 0;
+  if (!reenableInt1) {
     return;
   }
 
   const uint32_t now = millis();
-  if ((uint32_t)(now - lastAttemptMs) < 200U) {
+
+  if (!waveTimerStarted) {
+    if ((uint32_t)(now - lastAttemptMs) < 200U) {
+      return;
+    }
+    lastAttemptMs = now;
+    OT_DEBUG_PRINTLN_F("[DBG] timer: recover attempt");
+    (void)startWaveTimer();
     return;
   }
-  lastAttemptMs = now;
 
-  OT_DEBUG_PRINTLN_F("[DBG] timer: recover attempt");
-  (void)startWaveTimer();
+  // Detect stalled capture IRQs while timer still runs and auto-recover capture timers.
+  if ((uint32_t)(now - lastProgressCheckMs) < 600U) {
+    return;
+  }
+  lastProgressCheckMs = now;
+
+  noInterrupts();
+  const uint32_t ticksNow = wave_tick_count;
+  const uint32_t pitchCapNow = pitch_capture_count;
+  const uint32_t volCapNow = volume_capture_count;
+  interrupts();
+
+  const bool waveAdvancing = (ticksNow != lastTickCount);
+  const bool pitchAdvancing = (pitchCapNow != lastPitchCaptureCount);
+  const bool volAdvancing = (volCapNow != lastVolumeCaptureCount);
+
+  if (!waveAdvancing) {
+    OT_DEBUG_PRINTLN_F("[DBG] timer: stalled, restart");
+    stopWaveTimer();
+    (void)startWaveTimer();
+
+    // Re-sample after forced restart.
+    noInterrupts();
+    lastTickCount = wave_tick_count;
+    lastPitchCaptureCount = pitch_capture_count;
+    lastVolumeCaptureCount = volume_capture_count;
+    interrupts();
+    return;
+  }
+
+  if (waveAdvancing && (!pitchAdvancing || !volAdvancing)) {
+    OT_DEBUG_PRINT("[DBG] capture: restart pitch=");
+    OT_DEBUG_PRINT((unsigned long)pitchCapNow);
+    OT_DEBUG_PRINT(" vol=");
+    OT_DEBUG_PRINTLN((unsigned long)volCapNow);
+    stopCaptureTimers();
+    noInterrupts();
+    pitch_capture_raw_last = 0;
+    volume_capture_raw_last = 0;
+    pitch_capture_seen = false;
+    volume_capture_seen = false;
+    interrupts();
+    (void)startCaptureTimers();
+  }
+
+  lastTickCount = ticksNow;
+  lastPitchCaptureCount = pitchCapNow;
+  lastVolumeCaptureCount = volCapNow;
+}
+
+uint32_t ihGetWaveTickCount() {
+  noInterrupts();
+  const uint32_t v = wave_tick_count;
+  interrupts();
+  return v;
+}
+
+uint32_t ihGetPitchCaptureCount() {
+  noInterrupts();
+  const uint32_t v = pitch_capture_count;
+  interrupts();
+  return v;
+}
+
+uint32_t ihGetVolumeCaptureCount() {
+  noInterrupts();
+  const uint32_t v = volume_capture_count;
+  interrupts();
+  return v;
 }
 
 void ihSetWaveMorphEnabled(bool enabled) {
@@ -676,4 +988,32 @@ uint8_t ihGetToneTiltWetMax() {
 
 uint8_t ihGetSoftClipCubicShift() {
   return softClipCubicShift;
+}
+
+void ihSetMasterOutGainQ8(uint16_t gainQ8) {
+  if (gainQ8 < 64U) {
+    gainQ8 = 64U;
+  } else if (gainQ8 > 512U) {
+    gainQ8 = 512U;
+  }
+  noInterrupts();
+  masterOutGainQ8 = gainQ8;
+  interrupts();
+}
+
+uint16_t ihGetMasterOutGainQ8() {
+  return masterOutGainQ8;
+}
+
+void ihSetOutputFadeGateQ8(uint16_t gateQ8) {
+  if (gateQ8 > 256U) {
+    gateQ8 = 256U;
+  }
+  noInterrupts();
+  outputFadeGateQ8 = gateQ8;
+  interrupts();
+}
+
+uint16_t ihGetOutputFadeGateQ8() {
+  return outputFadeGateQ8;
 }
