@@ -69,7 +69,7 @@
 // 3-sample median prefilter on pitch capture path (1 = enabled, 0 = disabled).
 #define OT_PITCH_MEDIAN3_ENABLE 1
 // Pitch low-pass strength: filtered += (raw - filtered) >> shift (0 = off, 2 = legacy behavior).
-#define OT_PITCH_FILTER_SHIFT 4
+#define OT_PITCH_FILTER_SHIFT 6
 // Ignore tiny control-path pitch delta movement (in pitchDelta units, post gain/curve).
 #define OT_PITCH_CONTROL_DEADBAND 0
 // Limit sample-increment change per control update (0 = disabled).
@@ -77,7 +77,7 @@
 // Use reciprocal-domain pitch mapping around calibration base (1 = on, 0 = linear delta).
 #define OT_PITCH_RECIPROCAL_MAP_ENABLE 1
 // Output scaling for reciprocal mapping (higher = less sensitive).
-#define OT_PITCH_RECIPROCAL_SHIFT 4
+#define OT_PITCH_RECIPROCAL_SHIFT 2
 
 
 #define OT_VOLUME_RESPONSE_GAIN 12

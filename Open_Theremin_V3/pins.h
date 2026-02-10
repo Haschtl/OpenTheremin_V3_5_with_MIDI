@@ -8,12 +8,12 @@
 #endif
 
 // Shield wiring for the UNO R4 port.
-static const uint8_t OT_BUTTON_PIN = 6;
-static const uint8_t OT_LED1_PIN = 18;  // A4
-static const uint8_t OT_LED2_PIN = 19;  // A5
+static const uint8_t OT_BUTTON_PIN = 8;
+static const uint8_t OT_LED1_PIN = A4;  // A4
+static const uint8_t OT_LED2_PIN = A5;  // A5
 
 static const uint8_t OT_VOLUME_CAPTURE_PIN = 2;
-static const uint8_t OT_PITCH_CAPTURE_PIN = 8;
+static const uint8_t OT_PITCH_CAPTURE_PIN = 6;
 
 static const uint8_t OT_DAC_LDAC_PIN = 7;
 static const uint8_t OT_DAC1_CS_PIN = 10;

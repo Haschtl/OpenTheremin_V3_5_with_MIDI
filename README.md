@@ -11,6 +11,7 @@ This fork targets **Arduino UNO R4 Minima / UNO R4 WiFi** and focuses on:
 ### 1) Hardware
 - Target board: **UNO R4 Minima** or **UNO R4 WiFi**
 - Shield/wiring as defined in `Open_Theremin_V3/pins.h`
+- Note: Pitch capture and button pins are swapped (`D6` = pitch capture, `D8` = button) to use a GPT32 channel for pitch.
 
 ### 2) Build (PlatformIO)
 Default firmware:
