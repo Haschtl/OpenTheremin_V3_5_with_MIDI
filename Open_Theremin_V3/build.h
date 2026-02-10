@@ -33,9 +33,12 @@
 
 // Audio ISR tick rate in Hz (31.25kHz keeps legacy behavior).
 // Original: 31250
-#define OT_AUDIO_TICK_HZ 31250
+#define OT_AUDIO_TICK_HZ 48000
 #define OT_AUDIO_TICK_HZ_MIN 20000
 #define OT_AUDIO_TICK_HZ_MAX 96000
+// Safety cap for runtime preset switching to avoid unstable high-rate timer restarts.
+// Set to 0 to disable capping.
+#define OT_AUDIO_TICK_SAFE_MAX_HZ 96000
 
 // Timer selection:
 // 0 = prefer GPT (default core behavior), 1 = prefer AGT (often more robust on some R4 setups).
@@ -44,20 +47,46 @@
 // Audio rate preset helper in application.cpp:
 // 0 = 31.25kHz, 1 = 40kHz, 2 = 48kHz, 3 = custom OT_AUDIO_TICK_HZ.
 #define OT_AUDIO_RATE_PRESET 0
-// Safety cap for runtime preset switching to avoid unstable high-rate timer restarts.
-// Set to 0 to disable capping.
-#define OT_AUDIO_TICK_SAFE_MAX_HZ 40000
 
 // Median filtering for analog pots (odd number, currently supported: 3).
 #define OT_POT_MEDIAN_SAMPLES 3
 
+// Gate time (ms) for capture edge counting during calibration/measurement.
+#define OT_CAPTURE_GATE_MS 1000
+
 // Antenna response gain (higher = more sensitive hand movement response).
-#define OT_PITCH_RESPONSE_GAIN 22
+#define OT_PITCH_RESPONSE_GAIN 42
 // Pitch response curve (0 = linear raw-delta mapping, 1 = nonlinear compression at larger deltas).
 #define OT_PITCH_CURVE_ENABLE 1
 // Curve strength for OT_PITCH_CURVE_ENABLE (higher = stronger compression near antenna).
-#define OT_PITCH_CURVE_K 64
+#define OT_PITCH_CURVE_K 10000
+// Average this many capture periods before publishing one pitch sample (1 = off).
+#define OT_PITCH_CAPTURE_AVG_EDGES 8
+// Preserve fractional resolution when averaging capture periods (Q bits in raw value).
+#define OT_PITCH_CAPTURE_Q_BITS 4
+// Capture on both rising and falling edges for higher effective resolution.
+#define OT_PITCH_CAPTURE_BOTH_EDGES 1
+// 3-sample median prefilter on pitch capture path (1 = enabled, 0 = disabled).
+#define OT_PITCH_MEDIAN3_ENABLE 1
+// Pitch low-pass strength: filtered += (raw - filtered) >> shift (0 = off, 2 = legacy behavior).
+#define OT_PITCH_FILTER_SHIFT 4
+// Ignore tiny control-path pitch delta movement (in pitchDelta units, post gain/curve).
+#define OT_PITCH_CONTROL_DEADBAND 0
+// Limit sample-increment change per control update (0 = disabled).
+#define OT_PITCH_DELTA_LIMIT_PER_UPDATE 0
+// Use reciprocal-domain pitch mapping around calibration base (1 = on, 0 = linear delta).
+#define OT_PITCH_RECIPROCAL_MAP_ENABLE 1
+// Output scaling for reciprocal mapping (higher = less sensitive).
+#define OT_PITCH_RECIPROCAL_SHIFT 4
+
+
 #define OT_VOLUME_RESPONSE_GAIN 12
+// Average this many capture periods before publishing one volume sample (1 = off).
+#define OT_VOLUME_CAPTURE_AVG_EDGES 8
+// Preserve fractional resolution when averaging capture periods (Q bits in raw value).
+#define OT_VOLUME_CAPTURE_Q_BITS 4
+// Capture on both rising and falling edges for higher effective resolution.
+#define OT_VOLUME_CAPTURE_BOTH_EDGES 1
 // Volume raw capture sanitize guard (1 = enabled, 0 = disabled / Rev3-closer).
 #define OT_VOLUME_SANITIZE_ENABLE 1
 // 3-sample median prefilter on volume capture path (1 = enabled, 0 = disabled).
@@ -83,7 +112,7 @@
 // 1 = lock to plain sine voice and fixed clean engine settings (ignores parameter/value pot changes).
 // 0 = normal instrument behavior.
 #ifndef OT_TESTMODE_CLEAN_SINE
-#define OT_TESTMODE_CLEAN_SINE 0
+#define OT_TESTMODE_CLEAN_SINE 1
 #endif
 
 // Audio timbre shaping controls.

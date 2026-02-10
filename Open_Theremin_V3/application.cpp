@@ -204,9 +204,11 @@ static void applyCleanSineTestMode() {
   ihSetToneTiltEnabled(false);
   ihSetSoftClipEnabled(false);
   ihSetVibratoJitterEnabled(false);
+  ihSetCleanSineTestMode(true);
   ihSetWaveMorphStepQ8(1);
   ihSetToneTiltWetMax(0);
-  ihSetMasterOutGainQ8(220);
+  ihSetMasterOutGainQ8(200);
+  ihSetOutputFadeGateQ8(256);
 #endif
 }
 
@@ -420,7 +422,16 @@ static unsigned long countCaptureEdgesForMs(bool pitchChannel, uint16_t gateMs) 
     delay(1);
   }
   const uint32_t endEdges = pitchChannel ? ihGetPitchCaptureCount() : ihGetVolumeCaptureCount();
-  const uint32_t edges = endEdges - startEdges;
+  uint32_t edges = endEdges - startEdges;
+  if (pitchChannel) {
+#if OT_PITCH_CAPTURE_BOTH_EDGES
+    edges = (edges + 1U) >> 1;
+#endif
+  } else {
+#if OT_VOLUME_CAPTURE_BOTH_EDGES
+    edges = (edges + 1U) >> 1;
+#endif
+  }
   return (edges * 1000UL) / gateMs;
 }
 
@@ -439,9 +450,27 @@ static inline int32_t applyPitchResponseCurve(int32_t rawDelta) {
   if (denom <= 0) {
     return rawDelta;
   }
-  return (int32_t)(((int64_t)rawDelta * 4096LL) / denom);
+  // Inverted curve: expand near antenna instead of compressing.
+  int64_t out = ((int64_t)rawDelta * denom) / 4096LL;
+  if (out > INT32_MAX) out = INT32_MAX;
+  if (out < INT32_MIN) out = INT32_MIN;
+  return (int32_t)out;
 #else
   return rawDelta;
+#endif
+}
+
+static inline int32_t computePitchDeltaMapped(int32_t pitchValue, int32_t pitchBase) {
+#if OT_PITCH_RECIPROCAL_MAP_ENABLE
+  if (pitchValue <= 0 || pitchBase <= 0) {
+    return 0;
+  }
+  const int64_t ratioQ12 = ((int64_t)pitchBase << 12) / (int64_t)pitchValue;
+  const int64_t recipDeltaQ12 = 4096LL - ratioQ12;
+  const uint8_t shift = (OT_PITCH_RECIPROCAL_SHIFT > 12U) ? 12U : (uint8_t)OT_PITCH_RECIPROCAL_SHIFT;
+  return (int32_t)((recipDeltaQ12 * (int64_t)OT_PITCH_RESPONSE_GAIN) >> shift);
+#else
+  return (((pitchValue - pitchBase) * (int32_t)OT_PITCH_RESPONSE_GAIN) >> 2);
 #endif
 }
 
@@ -588,13 +617,13 @@ void Application::InitialiseVolumeMeasurement() {
 
 unsigned long Application::GetPitchMeasurement()
 {
-  return countCaptureEdgesForMs(true, 1000);
+  return countCaptureEdgesForMs(true, OT_CAPTURE_GATE_MS);
 
 }
 
 unsigned long Application::GetVolumeMeasurement()
 {
-  return countCaptureEdgesForMs(false, 1000);
+  return countCaptureEdgesForMs(false, OT_CAPTURE_GATE_MS);
 }
 
 
@@ -612,6 +641,12 @@ AppMode Application::nextMode() {
 void Application::loop() {
   int32_t pitch_v = 0, pitch_l = 0;            // Last value of pitch  (for filtering)
   int32_t vol_v = 0,   vol_l = 0;              // Last value of volume (for filtering)
+  uint32_t pitchMedian0 = 0, pitchMedian1 = 0, pitchMedian2 = 0;
+  bool pitchMedianPrimed = false;
+  int32_t pitchDeadbandDelta = 0;
+  bool pitchDeadbandPrimed = false;
+  int16_t pitchLimitedIncrement = 0;
+  bool pitchLimiterPrimed = false;
   uint32_t volMedian0 = 0, volMedian1 = 0, volMedian2 = 0;
   bool volMedianPrimed = false;
   uint16_t volLimitedScaled = 0;
@@ -920,8 +955,25 @@ void Application::loop() {
 #if OT_DEBUG_ENABLED && (OT_DEBUG_RUNTIME_LOGS || OT_DEBUG_SENSOR_LOGS)
     dbgPitchRaw = pitch;
 #endif
-    pitch_v=pitch;                         // Averaging pitch values
-    pitch_v=pitch_l+((pitch_v-pitch_l)>>2);
+    uint32_t pitchPrepared = (uint32_t)pitch;
+#if OT_PITCH_MEDIAN3_ENABLE
+    if (!pitchMedianPrimed) {
+      pitchMedian0 = pitchPrepared;
+      pitchMedian1 = pitchPrepared;
+      pitchMedian2 = pitchPrepared;
+      pitchMedianPrimed = true;
+    } else {
+      pitchMedian0 = pitchMedian1;
+      pitchMedian1 = pitchMedian2;
+      pitchMedian2 = pitchPrepared;
+    }
+    pitchPrepared = median3U32(pitchMedian0, pitchMedian1, pitchMedian2);
+#endif
+    pitch_v = (int32_t)pitchPrepared;      // Averaging pitch values
+    const uint8_t pitchFilterShift = (OT_PITCH_FILTER_SHIFT > 6U) ? 6U : (uint8_t)OT_PITCH_FILTER_SHIFT;
+    if (pitchFilterShift > 0U) {
+      pitch_v = pitch_l + ((pitch_v - pitch_l) >> pitchFilterShift);
+    }
     pitch_l=pitch_v;
 #if OT_DEBUG_ENABLED && (OT_DEBUG_RUNTIME_LOGS || OT_DEBUG_SENSOR_LOGS)
     dbgPitchFiltered = pitch_v;
@@ -936,9 +988,41 @@ void Application::loop() {
       case MUTE : /* NOTHING! */;                                        break;
       case NORMAL: {
         const uint8_t transposeShift = (registerValue < 1U) ? 1U : ((registerValue > 6U) ? 6U : registerValue);
-        const int32_t rawPitchDelta = (((pitch_v - pitchCalibrationBase) * (int32_t)OT_PITCH_RESPONSE_GAIN) >> 2);
-        const int32_t pitchDelta = applyPitchResponseCurve(rawPitchDelta);
-        setWavetableSampleAdvance((pitchDelta + 2048 - ((int32_t)pitchPotValue << 1)) >> transposeShift);
+        const int32_t rawPitchDelta = computePitchDeltaMapped(pitch_v, pitchCalibrationBase);
+        int32_t pitchDelta = applyPitchResponseCurve(rawPitchDelta);
+        const int32_t pitchDeadband = (OT_PITCH_CONTROL_DEADBAND < 0) ? 0 : (int32_t)OT_PITCH_CONTROL_DEADBAND;
+        if (!pitchDeadbandPrimed) {
+          pitchDeadbandDelta = pitchDelta;
+          pitchDeadbandPrimed = true;
+        } else if (pitchDeadband > 0) {
+          const int32_t d = pitchDelta - pitchDeadbandDelta;
+          if (d <= pitchDeadband && d >= -pitchDeadband) {
+            pitchDelta = pitchDeadbandDelta;
+          } else {
+            pitchDeadbandDelta = pitchDelta;
+          }
+        } else {
+          pitchDeadbandDelta = pitchDelta;
+        }
+
+        const int32_t targetIncrement = (pitchDelta + 2048 - ((int32_t)pitchPotValue << 1)) >> transposeShift;
+        int16_t nextIncrement = (int16_t)targetIncrement;
+        const int32_t pitchDeltaLimit = (OT_PITCH_DELTA_LIMIT_PER_UPDATE < 0) ? 0 : (int32_t)OT_PITCH_DELTA_LIMIT_PER_UPDATE;
+        if (!pitchLimiterPrimed) {
+          pitchLimitedIncrement = nextIncrement;
+          pitchLimiterPrimed = true;
+        } else if (pitchDeltaLimit > 0) {
+          int32_t d = (int32_t)nextIncrement - (int32_t)pitchLimitedIncrement;
+          if (d > pitchDeltaLimit) {
+            d = pitchDeltaLimit;
+          } else if (d < -pitchDeltaLimit) {
+            d = -pitchDeltaLimit;
+          }
+          pitchLimitedIncrement = (int16_t)((int32_t)pitchLimitedIncrement + d);
+        } else {
+          pitchLimitedIncrement = nextIncrement;
+        }
+        setWavetableSampleAdvance((uint16_t)pitchLimitedIncrement);
         break;
       }
     };

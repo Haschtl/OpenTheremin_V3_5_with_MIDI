@@ -62,6 +62,7 @@ void ihSetMasterOutGainQ8(uint16_t gainQ8);
 uint16_t ihGetMasterOutGainQ8();
 void ihSetOutputFadeGateQ8(uint16_t gateQ8);
 uint16_t ihGetOutputFadeGateQ8();
+void ihSetCleanSineTestMode(bool enabled);
 void resetPitchFlag();
 void resetVolFlag();
 void savePitchCounter();
